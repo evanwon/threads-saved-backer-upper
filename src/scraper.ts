@@ -1,14 +1,9 @@
 import type { BrowserContext } from "playwright";
 
-export interface RawPostData {
-  scriptJson: unknown;
-  postId?: string;
-}
-
 /**
  * Recursively search a JSON object for arrays that look like thread items.
- * Threads embeds post data in <script type="application/json" data-sjs> tags
- * inside deeply nested `require` call structures.
+ * Threads embeds post data in deeply nested structures — both in initial
+ * <script data-sjs> tags and in GraphQL API responses during scroll.
  */
 function findThreadItems(obj: unknown, results: unknown[] = []): unknown[] {
   if (obj === null || obj === undefined) return results;
@@ -83,6 +78,41 @@ function extractPostId(item: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * Process a JSON blob (from script tags or network responses) and extract new posts.
+ */
+function processJson(
+  json: unknown,
+  seenIds: Set<string>,
+  knownPostIds: Set<string>,
+  collectedItems: unknown[]
+): { newCount: number; hitKnown: boolean } {
+  const items = findThreadItems(json);
+  let newCount = 0;
+  let hitKnown = false;
+
+  for (const item of items) {
+    const postId = extractPostId(item);
+    if (!postId) continue;
+    if (seenIds.has(postId)) continue;
+
+    seenIds.add(postId);
+
+    if (knownPostIds.has(postId)) {
+      console.log(
+        `Found already backed-up post ${postId}, stopping.`
+      );
+      hitKnown = true;
+      break;
+    }
+
+    collectedItems.push(item);
+    newCount++;
+  }
+
+  return { newCount, hitKnown };
+}
+
 export async function scrapeSavedPosts(
   context: BrowserContext,
   knownPostIds: Set<string>
@@ -90,8 +120,68 @@ export async function scrapeSavedPosts(
   const page = await context.newPage();
   const collectedItems: unknown[] = [];
   const seenIds = new Set<string>();
+  let hitKnownPost = false;
   let noNewContentCount = 0;
-  const MAX_EMPTY_SCROLLS = 5;
+  const MAX_EMPTY_SCROLLS = 8;
+
+  // Listen for network responses that contain post data (API calls)
+  let pendingNewItems = 0;
+  page.on("response", async (response) => {
+    const url = response.url();
+
+    // Match Threads API endpoints
+    if (
+      !url.includes("/api/graphql") &&
+      !url.includes("/graphql") &&
+      !url.includes("/api/v1/")
+    ) return;
+
+    try {
+      const body = await response.text();
+      // Responses may be multipart or JSON
+      const jsonTexts: string[] = [];
+
+      // Handle "for (;;);" prefix that Meta APIs sometimes use
+      const cleaned = body.replace(/^for\s*\(;;\)\s*;\s*/, "");
+
+      // Try parsing as single JSON
+      try {
+        JSON.parse(cleaned);
+        jsonTexts.push(cleaned);
+      } catch {
+        // Try splitting on newlines (streaming JSON responses)
+        for (const line of cleaned.split("\n")) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+            try {
+              JSON.parse(trimmed);
+              jsonTexts.push(trimmed);
+            } catch {
+              // skip
+            }
+          }
+        }
+      }
+
+      for (const text of jsonTexts) {
+        const json = JSON.parse(text);
+        const { newCount, hitKnown } = processJson(
+          json,
+          seenIds,
+          knownPostIds,
+          collectedItems
+        );
+        if (newCount > 0) {
+          pendingNewItems += newCount;
+        }
+        if (hitKnown) {
+          hitKnownPost = true;
+        }
+      }
+    } catch {
+      // Response not JSON or unreadable, skip
+    }
+  });
 
   try {
     console.log("Navigating to saved posts...");
@@ -102,71 +192,61 @@ export async function scrapeSavedPosts(
     // Wait for initial content
     await page.waitForTimeout(3000);
 
+    // Extract from initial script tags
+    const scriptData = await page.evaluate(() => {
+      const scripts = document.querySelectorAll(
+        'script[type="application/json"][data-sjs]'
+      );
+      return Array.from(scripts).map((s) => s.textContent);
+    });
+
+    for (const text of scriptData) {
+      if (!text) continue;
+      try {
+        const json = JSON.parse(text);
+        const { hitKnown } = processJson(
+          json,
+          seenIds,
+          knownPostIds,
+          collectedItems
+        );
+        if (hitKnown) hitKnownPost = true;
+      } catch {
+        // skip
+      }
+    }
+
+    console.log(
+      `Initial load: ${collectedItems.length} posts from script tags.`
+    );
+
+    // Scroll loop to load more content via API
     let scrollCount = 0;
-    let hitKnownPost = false;
 
     while (!hitKnownPost && noNewContentCount < MAX_EMPTY_SCROLLS) {
       scrollCount++;
+      pendingNewItems = 0;
 
-      // Extract JSON data from all script tags
-      const scriptData = await page.evaluate(() => {
-        const scripts = document.querySelectorAll(
-          'script[type="application/json"][data-sjs]'
-        );
-        return Array.from(scripts).map((s) => s.textContent);
-      });
-
-      let newItemsThisScroll = 0;
-
-      for (const text of scriptData) {
-        if (!text) continue;
-        try {
-          const json = JSON.parse(text);
-          const items = findThreadItems(json);
-
-          for (const item of items) {
-            const postId = extractPostId(item);
-            if (!postId) continue;
-            if (seenIds.has(postId)) continue;
-
-            seenIds.add(postId);
-
-            if (knownPostIds.has(postId)) {
-              console.log(
-                `Found already backed-up post ${postId}, stopping scroll.`
-              );
-              hitKnownPost = true;
-              break;
-            }
-
-            collectedItems.push(item);
-            newItemsThisScroll++;
-          }
-
-          if (hitKnownPost) break;
-        } catch {
-          // Invalid JSON, skip
-        }
-      }
-
-      if (newItemsThisScroll === 0) {
-        noNewContentCount++;
-      } else {
-        noNewContentCount = 0;
-      }
-
-      console.log(
-        `Scroll #${scrollCount}: ${newItemsThisScroll} new items (${collectedItems.length} total)`
+      // Scroll to the very bottom of current content
+      await page.evaluate(() =>
+        window.scrollTo(0, document.body.scrollHeight)
       );
 
-      if (hitKnownPost) break;
-
-      // Scroll down
-      await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-
-      // Random delay between 1-3 seconds
-      const delay = 1000 + Math.random() * 2000;
+      // Wait for network responses (random delay 2-4s to be safe)
+      const delay = 2000 + Math.random() * 2000;
       await page.waitForTimeout(delay);
+
+      if (pendingNewItems > 0) {
+        noNewContentCount = 0;
+        console.log(
+          `Scroll #${scrollCount}: ${pendingNewItems} new items (${collectedItems.length} total)`
+        );
+      } else {
+        noNewContentCount++;
+        console.log(
+          `Scroll #${scrollCount}: no new items (${noNewContentCount}/${MAX_EMPTY_SCROLLS} empty)`
+        );
+      }
     }
 
     console.log(
