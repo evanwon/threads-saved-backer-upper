@@ -35,7 +35,7 @@ function buildFilename(post: PostData): string {
   const author = post.author.replace("@", "");
   const date = post.timestamp.slice(0, 10); // YYYY-MM-DD
   const slug = textSlug(post.text);
-  return `${sanitizeFilename(author)}-${slug}-${date}.md`;
+  return `${date}-${sanitizeFilename(author)}-${slug}.md`;
 }
 
 /**
