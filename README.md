@@ -138,3 +138,15 @@ src/
 - Videos are linked, not downloaded
 - Threads may change their internal API structure at any time, which could break the parser
 - Anti-bot detection is possible; the tool uses realistic scroll timing to mitigate this
+
+## Disclaimer
+
+Threadsafe is an independent, open-source project. It is **not affiliated with, endorsed by, or associated with Meta Platforms, Inc.** or any of its products (including Threads, Instagram, or Facebook).
+
+"Threads" is a trademark of Meta Platforms, Inc. All trademarks belong to their respective owners.
+
+This tool accesses publicly available web pages through browser automation for the sole purpose of backing up your own saved content. It does not bypass authentication, circumvent access controls, or access data belonging to other users. Use of this tool is at your own risk and subject to the [Threads Terms of Use](https://help.instagram.com/769983657850450). The authors are not responsible for any consequences resulting from its use, including account restrictions or data loss.
+
+## License
+
+MIT
