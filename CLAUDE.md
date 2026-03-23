@@ -17,6 +17,7 @@ Threadsafe is a TypeScript CLI tool that backs up saved Threads posts as Obsidia
 - `npm start` — Run the backup tool (`tsx src/index.ts`)
 - `npm start -- --output /path/to/dir` — Override output directory
 - `npm start -- --output /path/to/dir --save-config` — Save output dir to `config.json`
+- `npm start -- --gallery-only` — Regenerate gallery HTML without scraping
 - `npx tsc --noEmit` — Type check without emitting
 - `npm test` — Run unit tests (`tests/gallery.test.ts`)
 - `npm run validate` — Run Playwright render validation (generates gallery from fixtures, opens in headless Chromium, checks for JS errors)
@@ -51,6 +52,10 @@ The gallery embeds JavaScript inside a TypeScript template literal — this mean
 - The domain is `threads.com` (not `threads.net`) — the site redirects.
 - GraphQL responses during scroll are small (one post per response), not batched.
 - Scrolling must go to `document.body.scrollHeight` (not just one viewport) to trigger new content loads.
+
+## Documentation
+
+When making user-facing changes (new flags, changed behavior, new commands), check if README.md and this file need updating. CLI flags should be documented in both the Key Commands section here and the Usage section of README.md.
 
 ## Sensitive Files (gitignored)
 

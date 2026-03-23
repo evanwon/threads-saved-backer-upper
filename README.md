@@ -67,6 +67,12 @@ Each backup run also generates `index.html` in your output directory — a self-
 
 The gallery is regenerated automatically after every backup, including runs where no new posts are found.
 
+To regenerate the gallery without scraping new data (useful when iterating on the gallery template):
+
+```bash
+npm start -- --gallery-only
+```
+
 ## Incremental Backups
 
 Post IDs are tracked in `state.json`. On subsequent runs, the tool stops scrolling when it encounters a previously backed-up post, so only new saves are fetched.
