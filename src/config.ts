@@ -30,9 +30,10 @@ export async function saveConfig(config: Config): Promise<void> {
  * Parse CLI args and merge with saved config.
  * Priority: --output flag > config.json > default ./output
  */
-export async function resolveConfig(): Promise<Config> {
+export async function resolveConfig(): Promise<Config & { galleryOnly: boolean }> {
   const config = await loadConfig();
   const args = process.argv.slice(2);
+  let galleryOnly = false;
 
   for (let i = 0; i < args.length; i++) {
     if ((args[i] === "--output" || args[i] === "-o") && args[i + 1]) {
@@ -43,7 +44,10 @@ export async function resolveConfig(): Promise<Config> {
       await saveConfig(config);
       console.log(`Config saved to ${CONFIG_PATH}`);
     }
+    if (args[i] === "--gallery-only") {
+      galleryOnly = true;
+    }
   }
 
-  return config;
+  return { ...config, galleryOnly };
 }

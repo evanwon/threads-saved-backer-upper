@@ -20,6 +20,13 @@ async function main() {
   await mkdir(resolve(OUTPUT_DIR, "posts"), { recursive: true });
   await mkdir(resolve(OUTPUT_DIR, "assets"), { recursive: true });
 
+  if (config.galleryOnly) {
+    console.log("Gallery-only mode: regenerating HTML from existing posts...");
+    await generateGallery(OUTPUT_DIR);
+    console.log("\nDone!");
+    return;
+  }
+
   // Load backup state
   const state = await loadState();
   const knownIds = new Set(state.backedUpPostIds);
