@@ -9,7 +9,8 @@ Threadsafe is a TypeScript CLI tool that backs up saved Threads posts as Obsidia
 - TypeScript with ESNext/NodeNext module resolution
 - Playwright (Chromium only) for browser automation
 - tsx for direct TS execution (no build step needed)
-- No test framework (manual testing against live site)
+- node:test + node:assert for unit tests
+- Playwright for render validation (headless gallery checking)
 
 ## Key Commands
 
@@ -17,6 +18,9 @@ Threadsafe is a TypeScript CLI tool that backs up saved Threads posts as Obsidia
 - `npm start -- --output /path/to/dir` — Override output directory
 - `npm start -- --output /path/to/dir --save-config` — Save output dir to `config.json`
 - `npx tsc --noEmit` — Type check without emitting
+- `npm test` — Run unit tests (`tests/gallery.test.ts`)
+- `npm run validate` — Run Playwright render validation (generates gallery from fixtures, opens in headless Chromium, checks for JS errors)
+- `npm run validate -- path/to/index.html` — Validate an existing gallery file
 
 ## Architecture
 
@@ -30,6 +34,16 @@ The pipeline flows: **config -> auth -> scrape -> parse -> download -> markdown 
 - `markdown.ts` — Generates `.md` files with YAML frontmatter. Filenames: `@author-slug-YYYY-MM-DD.md`. Handles collisions with counter suffix.
 - `state.ts` — Tracks backed-up post IDs in `state.json` for incremental backups.
 - `gallery.ts` — Reads all markdown files, parses frontmatter, scans assets directory for images, and generates a self-contained `index.html` gallery. Runs after every backup (even when no new posts). Uses incremental rendering (50-post batches via IntersectionObserver) for performance with 1000+ posts.
+
+## Validation (required after changes)
+
+After any change to gallery.ts or types.ts, run all three:
+
+1. `npx tsc --noEmit` — Type check
+2. `npm test` — Unit tests for parsing logic
+3. `npm run validate` — Playwright render check (catches JS runtime errors in generated HTML)
+
+The gallery embeds JavaScript inside a TypeScript template literal — this means JS syntax errors won't be caught by tsc. The render validation is the only way to catch those.
 
 ## Important Patterns
 

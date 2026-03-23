@@ -4,7 +4,9 @@
   "description": "Back up saved Threads posts as Obsidian-compatible markdown",
   "type": "module",
   "scripts": {
-    "start": "tsx src/index.ts"
+    "start": "tsx src/index.ts",
+    "test": "tsx --test tests/gallery.test.ts",
+    "validate": "tsx tests/validate-render.ts"
   },
   "dependencies": {
     "playwright": "^1.50.0"
