@@ -199,6 +199,7 @@ export function generateHtml(posts: GalleryPost[]): string {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Threadsafe</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='5 3 22 14.5'%3E%3Crect x='6' y='4' width='20' height='3' rx='1.5' fill='white'/%3E%3Crect x='10' y='7' width='12' height='8' fill='white'/%3E%3Crect x='6' y='15' width='20' height='3' rx='1.5' fill='white'/%3E%3Crect x='14' y='5' width='4' height='7' rx='1' fill='%230095f6'/%3E%3Cpolygon points='11,11 16,16.5 21,11' fill='%230095f6'/%3E%3C/svg%3E">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
