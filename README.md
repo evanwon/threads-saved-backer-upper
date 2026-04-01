@@ -50,7 +50,7 @@ Priority: `--output` flag > `config.json` > `./output`
 
 1. Navigate to your saved posts page
 2. Scroll through all saved posts, intercepting API responses
-3. Download images (videos are linked but not downloaded)
+3. Download images and author profile pictures (videos are linked but not downloaded)
 4. Generate one markdown file per post in your output directory
 5. Save state for incremental backups
 6. Generate a browsable HTML gallery (`index.html`)

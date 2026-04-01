@@ -30,11 +30,11 @@ The pipeline flows: **config -> auth -> scrape -> parse -> download -> markdown 
 - `config.ts` — Loads persistent settings from `config.json`, merges with CLI args (`--output`, `--save-config`). Priority: CLI flag > config.json > default `./output`.
 - `auth.ts` — Manages Playwright session persistence via `session.json`. First run opens headed browser for manual login; subsequent runs reuse saved cookies.
 - `scraper.ts` — Navigates to `/saved`, listens for `response` events on `/graphql/query` endpoints, and scrolls to `document.body.scrollHeight` in a loop. Initial posts come from `<script data-sjs>` tags; subsequent pages come from intercepted network responses. Stops after 8 consecutive empty scrolls or when a known post ID is encountered.
-- `parser.ts` — Recursively searches nested JSON for objects with `post.pk` or `thread_items` keys. Extracts post ID, author, text, timestamp, media URLs, and engagement metrics.
-- `downloader.ts` — Downloads images with concurrency limit of 3. Skips videos (preserves URL for linking). Skips already-downloaded files.
+- `parser.ts` — Recursively searches nested JSON for objects with `post.pk` or `thread_items` keys. Extracts post ID, author, text, timestamp, media URLs, profile picture URL, and engagement metrics.
+- `downloader.ts` — Downloads images with concurrency limit of 3. Skips videos (preserves URL for linking). Skips already-downloaded files. Also downloads author profile pictures (one per author, always overwritten to stay current).
 - `markdown.ts` — Generates `.md` files with YAML frontmatter. Filenames: `@author-slug-YYYY-MM-DD.md`. Handles collisions with counter suffix.
 - `state.ts` — Tracks backed-up post IDs in `state.json` for incremental backups.
-- `gallery.ts` — Reads all markdown files, parses frontmatter, scans assets directory for images, and generates a self-contained `index.html` gallery. Runs after every backup (even when no new posts). Uses incremental rendering (50-post batches via IntersectionObserver) for performance with 1000+ posts.
+- `gallery.ts` — Reads all markdown files, parses frontmatter, scans assets directory for images and profile pictures, and generates a self-contained `index.html` gallery. Runs after every backup (even when no new posts). Uses incremental rendering (50-post batches via IntersectionObserver) for performance with 1000+ posts. Profile pictures render as circular avatars with fallback to colored initials.
 
 ## Validation (required after changes)
 
