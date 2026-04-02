@@ -216,4 +216,39 @@ describe("generateHtml", () => {
     // samplePost has no avatar field, so JSON should not contain avatar key
     assert.ok(!html.includes('"avatar":"assets/'));
   });
+
+  it("linkify: includes linkify function in output", () => {
+    const html = generateHtml([samplePost]);
+    assert.ok(html.includes("function linkify("));
+  });
+
+  it("linkify: embeds correct regex with proper escaping", () => {
+    const html = generateHtml([samplePost]);
+    // Backslashes must survive the template literal: \s and \/ in the output
+    assert.ok(html.includes("https?:\\/\\/[^\\s)&]+"));
+  });
+
+  it("linkify: uses linkify for post text in feed and modal views", () => {
+    const html = generateHtml([samplePost]);
+    // Feed and modal views should use linkify(), not esc(), for post text
+    const linkifyCalls = html.match(/linkify\(p\.text\)/g) || [];
+    assert.ok(linkifyCalls.length >= 2, "expected linkify(p.text) in feed and modal views");
+  });
+
+  it("linkify: post data with URL includes href-friendly characters", () => {
+    const postWithUrl: GalleryPost = {
+      ...samplePost,
+      text: "Visit https://example.com/path?q=1&r=2 for info",
+    };
+    const html = generateHtml([postWithUrl]);
+    // The post text in JSON should preserve the URL with & escaped for JSON
+    assert.ok(html.includes("https://example.com/path?q=1\\u0026r=2") ||
+              html.includes("https://example.com/path?q=1&r=2"));
+  });
+
+  it("linkify: strips trailing punctuation in regex", () => {
+    const html = generateHtml([samplePost]);
+    // The linkify function should include the trailing punctuation strip
+    assert.ok(html.includes('.replace(/[.,;:!]+$/,"")'));
+  });
 });

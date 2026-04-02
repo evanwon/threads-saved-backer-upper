@@ -46,12 +46,19 @@ After any change to gallery.ts or types.ts, run all three:
 
 The gallery embeds JavaScript inside a TypeScript template literal — this means JS syntax errors won't be caught by tsc. The render validation is the only way to catch those.
 
+When debugging gallery JS failures, don't guess — generate the HTML and inspect it:
+```
+npx tsx -e "import { generateHtml } from './src/gallery.ts'; import { writeFileSync } from 'fs'; writeFileSync('/tmp/gallery-debug.html', generateHtml([])); console.log('Done');"
+```
+Then read the generated file to see what the JS actually looks like. The `npm run validate` Playwright test also prints the temp file path — you can read that file to inspect the output.
+
 ## Important Patterns
 
 - The Threads JSON structure is undocumented and deeply nested. The parser uses recursive key searching rather than fixed paths, which makes it resilient to minor structural changes.
 - The domain is `threads.com` (not `threads.net`) — the site redirects.
 - GraphQL responses during scroll are small (one post per response), not batched.
 - Scrolling must go to `document.body.scrollHeight` (not just one viewport) to trigger new content loads.
+- **Template literal escaping in gallery.ts:** All the client-side JavaScript in `gallery.ts` lives inside a TypeScript template literal. Backslashes in JS code (regex `\s`, `\/`, etc.) get consumed by the template literal, so they must be double-escaped (`\\s`, `\\/`). When adding new JS functions with regex patterns, always generate the HTML to a file and inspect the output to verify escaping is correct.
 
 ## Documentation
 

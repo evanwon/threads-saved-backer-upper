@@ -287,6 +287,8 @@ img.avatar{object-fit:cover}
 .verified{display:inline-flex;margin-left:4px;vertical-align:middle}
 .date{color:var(--text2);font-size:14px;margin-left:auto}
 .post-text{font-size:15px;line-height:1.5;white-space:pre-wrap;margin-bottom:12px;word-break:break-word}
+.post-text a{color:#0095f6;text-decoration:none}
+.post-text a:hover{text-decoration:underline}
 .post-img{max-width:100%;border-radius:8px;margin-bottom:8px;display:block}
 .video-container{position:relative;cursor:pointer;margin-bottom:8px}
 .video-container .post-img{margin-bottom:0}
@@ -409,6 +411,15 @@ function stripAt(a){return a.replace(/^@/,"")}
 function esc(s){
   if(!s)return"";
   return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+function linkify(s){
+  if(!s)return"";
+  var t=esc(s);
+  return t.replace(/https?:\\/\\/[^\\s)&]+(?:&amp;[^\\s)&]+)*/g,function(url){
+    url=url.replace(/[.,;:!]+$/,"");
+    var href=url.replace(/&amp;/g,"&");
+    return '<a href="'+href+'" target="_blank" rel="noopener">'+url+'<\\/a>';
+  });
 }
 function fmtDate(d){
   try{var dt=new Date(d);return dt.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}
@@ -569,7 +580,7 @@ function renderPost(p){
     +renderAvatarHtml(p)
     +'<div><span class="author-name">'+author+'</span>'+vBadge+'</div>'
     +'<span class="date">'+esc(dateStr)+'</span></div>'
-    +(p.text?'<div class="post-text">'+esc(p.text)+'</div>':'')
+    +(p.text?'<div class="post-text">'+linkify(p.text)+'</div>':'')
     +renderMediaHtml(p)
     +'<div class="metrics"><span>&#10084; '+fmtNum(p.likes)+'</span><span>&#128172; '+fmtNum(p.replies)+'</span><span>&#128260; '+fmtNum(p.reposts)+'</span></div>'
     +'<div class="actions">'
@@ -581,6 +592,7 @@ function renderPost(p){
 
 function handlePostClick(e,el){
   if(currentView!=="grid")return;
+  if(e.target.closest("a"))return;
   if(e.target.closest(".video-container"))return;
   var id=el.dataset.id;
   var post=null;
@@ -604,7 +616,7 @@ function openModal(p){
     +'<div><span class="author-name">'+author+'</span>'+vBadge+'</div>'
     +'<span class="date">'+esc(dateStr)+'</span></div>'
     +'<div style="padding:12px 16px 16px">'
-    +(p.text?'<div class="post-text">'+esc(p.text)+'</div>':'')
+    +(p.text?'<div class="post-text">'+linkify(p.text)+'</div>':'')
     +renderMediaHtml(p)
     +'<div class="metrics"><span>&#10084; '+fmtNum(p.likes)+'</span><span>&#128172; '+fmtNum(p.replies)+'</span><span>&#128260; '+fmtNum(p.reposts)+'</span></div>'
     +'<div class="actions">'
