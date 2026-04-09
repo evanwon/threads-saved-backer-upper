@@ -57,7 +57,15 @@ Priority: `--output` flag > `config.json` > `./output`
 
 ## Gallery Viewer
 
-Each backup run also generates `index.html` in your output directory — a self-contained gallery for browsing all your saved posts in the browser. No server needed, just open the file.
+Each backup run also generates `index.html` in your output directory — a self-contained gallery for browsing all your saved posts in the browser. You can open the file directly, or use serve mode for a more integrated experience.
+
+### Serve Mode
+
+```bash
+npm run serve
+```
+
+Starts a local server at `localhost:3000` that serves the gallery with a **refresh button**. Clicking refresh triggers the full scrape pipeline from within the browser, with real-time progress updates streamed via Server-Sent Events. The page auto-reloads when new posts are fetched. Set the port with the `PORT` environment variable.
 
 - **Feed view** (default): scrollable timeline with full post text and images
 - **Grid view**: Pinterest-style card grid for visual scanning
@@ -71,6 +79,32 @@ To regenerate the gallery without scraping new data (useful when iterating on th
 
 ```bash
 npm start -- --gallery-only
+```
+
+### Debugging: Raw JSON Dump
+
+To inspect the raw API data for scraped posts (useful for debugging parser issues or investigating unsupported content types):
+
+```bash
+# Dump all saved posts
+npm start -- --dump-raw
+
+# Dump a single post
+npm start -- --dump-raw --url https://www.threads.net/post/XYZ --output /tmp/test
+```
+
+This writes the raw JSON to `<outputDir>/raw-dump-<timestamp>.json` and exits without parsing, downloading, or updating state.
+
+## Reset
+
+To re-scrape all posts from scratch (e.g., after parser improvements):
+
+```bash
+# Delete posts + state + gallery, re-scrape. Preserves downloaded images.
+npm start -- --reset
+
+# Full clean slate — also deletes downloaded images and profile pics.
+npm start -- --reset-all
 ```
 
 ## Incremental Backups

@@ -18,6 +18,11 @@ Threadsafe is a TypeScript CLI tool that backs up saved Threads posts as Obsidia
 - `npm start -- --output /path/to/dir` — Override output directory
 - `npm start -- --output /path/to/dir --save-config` — Save output dir to `config.json`
 - `npm start -- --gallery-only` — Regenerate gallery HTML without scraping
+- `npm start -- --url <post-url> --output /tmp/test` — Scrape a single post to an isolated directory (skips state tracking)
+- `npm start -- --dump-raw` — Dump raw scraped JSON to disk for inspection (no parsing/download/state update). Combine with `--url` for a single post.
+- `npm start -- --reset` — Delete all posts, state, and gallery, then re-scrape everything. Preserves downloaded assets.
+- `npm start -- --reset-all` — Same as `--reset` but also deletes assets (full clean slate).
+- `npm run serve` — Start local gallery server at localhost:3000 with in-app refresh button
 - `npx tsc --noEmit` — Type check without emitting
 - `npm test` — Run unit tests (`tests/gallery.test.ts`)
 - `npm run validate` — Run Playwright render validation (generates gallery from fixtures, opens in headless Chromium, checks for JS errors)
@@ -30,11 +35,13 @@ The pipeline flows: **config -> auth -> scrape -> parse -> download -> markdown 
 - `config.ts` — Loads persistent settings from `config.json`, merges with CLI args (`--output`, `--save-config`). Priority: CLI flag > config.json > default `./output`.
 - `auth.ts` — Manages Playwright session persistence via `session.json`. First run opens headed browser for manual login; subsequent runs reuse saved cookies.
 - `scraper.ts` — Navigates to `/saved`, listens for `response` events on `/graphql/query` endpoints, and scrolls to `document.body.scrollHeight` in a loop. Initial posts come from `<script data-sjs>` tags; subsequent pages come from intercepted network responses. Stops after 8 consecutive empty scrolls or when a known post ID is encountered.
-- `parser.ts` — Recursively searches nested JSON for objects with `post.pk` or `thread_items` keys. Extracts post ID, author, text, timestamp, media URLs, profile picture URL, and engagement metrics.
+- `parser.ts` — Recursively searches nested JSON for objects with `post.pk` or `thread_items` keys. Extracts post ID, author, text, timestamp, media URLs, profile picture URL, engagement metrics, and reply status (via `text_post_app_info.is_reply` and `reply_to_author`).
 - `downloader.ts` — Downloads images with concurrency limit of 3. Skips videos (preserves URL for linking). Skips already-downloaded files. Also downloads author profile pictures (one per author, always overwritten to stay current).
 - `markdown.ts` — Generates `.md` files with YAML frontmatter. Filenames: `@author-slug-YYYY-MM-DD.md`. Handles collisions with counter suffix.
 - `state.ts` — Tracks backed-up post IDs in `state.json` for incremental backups.
-- `gallery.ts` — Reads all markdown files, parses frontmatter, scans assets directory for images and profile pictures, and generates a self-contained `index.html` gallery. Runs after every backup (even when no new posts). Uses incremental rendering (50-post batches via IntersectionObserver) for performance with 1000+ posts. Profile pictures render as circular avatars with fallback to colored initials.
+- `gallery.ts` — Reads all markdown files, parses frontmatter, scans assets directory for images and profile pictures, and generates a self-contained `index.html` gallery. Runs after every backup (even when no new posts). Uses incremental rendering (50-post batches via IntersectionObserver) for performance with 1000+ posts. Profile pictures render as circular avatars with fallback to colored initials. Reply posts show a "Replying to @author" banner in feed/modal views and a reply badge in grid view.
+- `pipeline.ts` — Reusable scrape pipeline (auth -> scrape -> parse -> download -> markdown -> state -> gallery) with a progress callback. Used by both `index.ts` (CLI) and `server.ts` (serve mode).
+- `server.ts` — Local HTTP server for serve mode. Serves gallery at localhost:3000, injects a refresh button and progress overlay via SSE. The static `index.html` on disk remains standalone.
 
 ## Validation (required after changes)
 
@@ -51,6 +58,16 @@ When debugging gallery JS failures, don't guess — generate the HTML and inspec
 npx tsx -e "import { generateHtml } from './src/gallery.ts'; import { writeFileSync } from 'fs'; writeFileSync('/tmp/gallery-debug.html', generateHtml([])); console.log('Done');"
 ```
 Then read the generated file to see what the JS actually looks like. The `npm run validate` Playwright test also prints the temp file path — you can read that file to inspect the output.
+
+## Real-world verification
+
+Verify against real data before considering work complete.
+
+How: use `--url` with `--output` to test a single post without touching normal output:
+```
+npm start -- --url https://www.threads.net/post/XYZ --output /tmp/threadsafe-test
+```
+Then open the generated `index.html` and check that the post looks correct. For gallery-only changes, `--gallery-only` against real output is sufficient.
 
 ## Important Patterns
 
