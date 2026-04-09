@@ -1,13 +1,14 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile, rm, readdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { authenticate } from "./auth.js";
-import { scrapeSavedPosts } from "./scraper.js";
+import { scrapeSavedPosts, scrapeSinglePost } from "./scraper.js";
 import { parseThreadsData } from "./parser.js";
 import { downloadImages, downloadProfilePics } from "./downloader.js";
 import { generateMarkdownFiles } from "./markdown.js";
-import { loadState, saveState, addBackedUpPosts } from "./state.js";
 import { resolveConfig } from "./config.js";
 import { generateGallery } from "./gallery.js";
+import { runPipeline } from "./pipeline.js";
 
 async function main() {
   console.log("Threadsafe\n");
@@ -15,6 +16,36 @@ async function main() {
   const config = await resolveConfig();
   const OUTPUT_DIR = config.outputDir;
   console.log(`Output directory: ${OUTPUT_DIR}`);
+
+  // Handle --reset / --reset-all
+  if (config.reset) {
+    if (config.galleryOnly || config.url || config.dumpRaw) {
+      console.error("Error: --reset cannot be combined with --gallery-only, --url, or --dump-raw.");
+      process.exitCode = 1;
+      return;
+    }
+
+    const postsDir = resolve(OUTPUT_DIR, "posts");
+    const assetsDir = resolve(OUTPUT_DIR, "assets");
+    const galleryPath = resolve(OUTPUT_DIR, "index.html");
+    const statePath = resolve("state.json");
+
+    let postsDeleted = 0;
+    if (existsSync(postsDir)) {
+      const files = await readdir(postsDir);
+      postsDeleted = files.filter((f) => f.endsWith(".md")).length;
+      await rm(postsDir, { recursive: true });
+    }
+    if (existsSync(statePath)) await rm(statePath);
+    if (existsSync(galleryPath)) await rm(galleryPath);
+
+    if (config.resetAll && existsSync(assetsDir)) {
+      await rm(assetsDir, { recursive: true });
+      console.log(`Reset: deleted ${postsDeleted} posts, state, gallery, and assets.`);
+    } else {
+      console.log(`Reset: deleted ${postsDeleted} posts, state, and gallery. Assets preserved.`);
+    }
+  }
 
   // Ensure output directories exist
   await mkdir(resolve(OUTPUT_DIR, "posts"), { recursive: true });
@@ -27,67 +58,56 @@ async function main() {
     return;
   }
 
-  // Load backup state
-  const state = await loadState();
-  const knownIds = new Set(state.backedUpPostIds);
-  console.log(
-    `Loaded state: ${knownIds.size} previously backed-up posts.`
-  );
-
-  // Authenticate
-  const { context, closeBrowser } = await authenticate();
-
-  try {
-    // Scrape saved posts
-    const rawItems = await scrapeSavedPosts(context, knownIds);
-
-    if (rawItems.length === 0) {
-      console.log("No new posts found.");
-    } else {
-      // Parse into structured data
-      const posts = parseThreadsData(rawItems);
-      console.log(`Parsed ${posts.length} posts.`);
-
-      if (posts.length === 0) {
-        console.log("No posts could be parsed from scraped data.");
-      } else {
-        // Download images and profile pictures
-        const postsWithImages = await downloadImages(posts, OUTPUT_DIR);
-        await downloadProfilePics(posts, OUTPUT_DIR);
-
-        // Generate markdown files
-        const written = await generateMarkdownFiles(
-          postsWithImages,
-          OUTPUT_DIR
-        );
-        console.log(`Wrote ${written} markdown files to ${OUTPUT_DIR}/posts/`);
-
-        // Update state
-        const newPostIds = posts.map((p) => p.id);
-        const updatedState = addBackedUpPosts(state, newPostIds);
-        await saveState(updatedState);
-        console.log(
-          `State updated: ${updatedState.backedUpPostIds.length} total backed-up posts.`
-        );
-      }
-    }
-  } catch (err) {
-    console.error("Error during backup:", err);
-
-    // Try to save partial state even on error
+  // Dump-raw and single-post modes need their own auth
+  if (config.dumpRaw) {
+    const { context, closeBrowser } = await authenticate();
     try {
-      await saveState(state);
-    } catch {
-      // Ignore save errors during crash
+      const rawItems = config.url
+        ? await scrapeSinglePost(context, config.url)
+        : await scrapeSavedPosts(context, new Set());
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const dumpPath = resolve(OUTPUT_DIR, `raw-dump-${timestamp}.json`);
+      await writeFile(dumpPath, JSON.stringify(rawItems, null, 2), "utf-8");
+      console.log(`Dumped ${rawItems.length} raw items to ${dumpPath}`);
+    } finally {
+      await closeBrowser();
     }
-
-    process.exitCode = 1;
-  } finally {
-    await closeBrowser();
+    console.log("\nDone!");
+    return;
   }
 
-  // Generate gallery (always runs, even if no new posts or on error)
-  await generateGallery(OUTPUT_DIR);
+  if (config.url) {
+    const { context, closeBrowser } = await authenticate();
+    try {
+      const rawItems = await scrapeSinglePost(context, config.url);
+      if (config.dumpRaw) {
+        const dumpPath = resolve(OUTPUT_DIR, "raw-dump.json");
+        await writeFile(dumpPath, JSON.stringify(rawItems, null, 2), "utf-8");
+        console.log(`Raw data dumped to ${dumpPath}`);
+      }
+      const posts = parseThreadsData(rawItems);
+      console.log(`Parsed ${posts.length} post(s).`);
+      if (posts.length > 0) {
+        const postsWithImages = await downloadImages(posts, OUTPUT_DIR);
+        await downloadProfilePics(posts, OUTPUT_DIR);
+        const written = await generateMarkdownFiles(postsWithImages, OUTPUT_DIR);
+        console.log(`Wrote ${written} markdown file(s) to ${OUTPUT_DIR}/posts/`);
+      }
+    } finally {
+      await closeBrowser();
+    }
+    await generateGallery(OUTPUT_DIR);
+    console.log("\nDone!");
+    return;
+  }
+
+  const result = await runPipeline(OUTPUT_DIR, (step, detail) =>
+    console.log(`[${step}] ${detail}`)
+  );
+
+  if (result.error) {
+    process.exitCode = 1;
+  }
 
   console.log("\nDone!");
 }

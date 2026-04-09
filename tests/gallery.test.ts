@@ -131,6 +131,138 @@ describe("parseBody", () => {
     assert.equal(result.text, "Just some text");
     assert.equal(result.media.length, 0);
   });
+
+  it("extracts note callout from body", () => {
+    const body = `Post caption text
+
+> [!note]
+> This is the note content
+> spanning multiple lines
+
+---
+[View on Threads](https://threads.net)`;
+    const result = parseBody(body);
+    assert.equal(result.text, "Post caption text");
+    assert.equal(result.note, "This is the note content\nspanning multiple lines");
+    assert.equal(result.media.length, 0);
+  });
+
+  it("handles note with media", () => {
+    const body = `Caption
+
+> [!note]
+> Note text here
+
+![](assets/123-0.jpg)
+
+---
+[View on Threads](https://threads.net)`;
+    const result = parseBody(body);
+    assert.equal(result.text, "Caption");
+    assert.equal(result.note, "Note text here");
+    assert.equal(result.media.length, 1);
+    assert.equal(result.media[0].type, "image");
+  });
+
+  it("returns undefined note when no callout present", () => {
+    const body = `Just text
+
+---
+[View on Threads](https://threads.net)`;
+    const result = parseBody(body);
+    assert.equal(result.note, undefined);
+  });
+
+  it("handles note with empty lines", () => {
+    const body = `Caption
+
+> [!note]
+> First paragraph
+>
+> Second paragraph
+
+---
+[View on Threads](https://threads.net)`;
+    const result = parseBody(body);
+    assert.equal(result.note, "First paragraph\n\nSecond paragraph");
+  });
+
+  it("parses quote callout with author and text", () => {
+    const body = `My commentary
+
+> [!quote] @origuser
+> The original post text
+>
+> Second line of quoted text
+
+---
+[View on Threads](https://threads.net)`;
+    const result = parseBody(body);
+    assert.equal(result.text, "My commentary");
+    assert.ok(result.quotedPost);
+    assert.equal(result.quotedPost!.author, "@origuser");
+    assert.equal(result.quotedPost!.verified, false);
+    assert.equal(result.quotedPost!.text, "The original post text\n\nSecond line of quoted text");
+  });
+
+  it("parses quote callout with verified badge", () => {
+    const body = `Quote this
+
+> [!quote] @verifieduser \u2713
+> Some text
+
+---
+[View on Threads](https://threads.net)`;
+    const result = parseBody(body);
+    assert.ok(result.quotedPost);
+    assert.equal(result.quotedPost!.author, "@verifieduser");
+    assert.equal(result.quotedPost!.verified, true);
+  });
+
+  it("parses quote callout with image media", () => {
+    const body = `Look at this
+
+> [!quote] @photog
+> Nice shot
+>
+> ![](assets/123-q0.jpg)
+
+---
+[View on Threads](https://threads.net)`;
+    const result = parseBody(body);
+    assert.ok(result.quotedPost);
+    assert.equal(result.quotedPost!.media.length, 1);
+    assert.equal(result.quotedPost!.media[0].type, "image");
+    assert.equal(result.quotedPost!.media[0].src, "assets/123-q0.jpg");
+  });
+
+  it("parses quote callout with video and link", () => {
+    const body = `Cool video
+
+> [!quote] @vidposter
+> Check this out
+>
+> [Video](https://example.com/video.mp4)
+>
+> [View quoted post](https://www.threads.net/post/ABC)
+
+---
+[View on Threads](https://threads.net)`;
+    const result = parseBody(body);
+    assert.ok(result.quotedPost);
+    assert.equal(result.quotedPost!.media.length, 1);
+    assert.equal(result.quotedPost!.media[0].type, "video");
+    assert.equal(result.quotedPost!.url, "https://www.threads.net/post/ABC");
+  });
+
+  it("returns undefined quotedPost when no quote callout present", () => {
+    const body = `Just text
+
+---
+[View on Threads](https://threads.net)`;
+    const result = parseBody(body);
+    assert.equal(result.quotedPost, undefined);
+  });
 });
 
 describe("generateHtml", () => {
@@ -250,5 +382,72 @@ describe("generateHtml", () => {
     const html = generateHtml([samplePost]);
     // The linkify function should include the trailing punctuation strip
     assert.ok(html.includes('.replace(/[.,;:!]+$/,"")'));
+  });
+
+  it("renders note embed for posts with notes", () => {
+    const notePost: GalleryPost = {
+      ...samplePost,
+      note: "This is a long note with detailed content",
+    };
+    const html = generateHtml([notePost]);
+    assert.ok(html.includes("function renderNoteHtml("));
+    assert.ok(html.includes("note-embed"));
+    assert.ok(html.includes("note-label"));
+    assert.ok(html.includes("note-text"));
+  });
+
+  it("includes note text in search haystack", () => {
+    const html = generateHtml([samplePost]);
+    assert.ok(html.includes("p.note"));
+  });
+
+  it("renders quote embed for posts with quotedPost", () => {
+    const postWithQuote: GalleryPost = {
+      ...samplePost,
+      quotedPost: {
+        author: "@quoted",
+        verified: true,
+        text: "Original content",
+        url: "https://www.threads.net/post/99",
+        media: [{ type: "image", src: "assets/123-q0.jpg" }],
+      },
+    };
+    const html = generateHtml([postWithQuote]);
+    assert.ok(html.includes("quote-embed"));
+    assert.ok(html.includes("quote-author-name"));
+    assert.ok(html.includes("renderQuoteHtml"));
+  });
+
+  it("includes quoted post text in search haystack", () => {
+    const html = generateHtml([samplePost]);
+    assert.ok(html.includes("p.quotedPost"));
+  });
+
+  it("includes reply banner function in output", () => {
+    const html = generateHtml([samplePost]);
+    assert.ok(html.includes("function renderReplyBanner("));
+  });
+
+  it("embeds isReply field for reply posts", () => {
+    const replyPost: GalleryPost = {
+      ...samplePost,
+      id: "789",
+      isReply: true,
+      replyToAuthor: "@original",
+    };
+    const html = generateHtml([replyPost]);
+    assert.ok(html.includes('"isReply":true'));
+    assert.ok(html.includes('"replyToAuthor":"@original"'));
+  });
+
+  it("omits isReply for non-reply posts", () => {
+    const html = generateHtml([samplePost]);
+    assert.ok(!html.includes('"isReply":true'));
+  });
+
+  it("includes reply CSS styles", () => {
+    const html = generateHtml([samplePost]);
+    assert.ok(html.includes(".reply-banner"));
+    assert.ok(html.includes(".reply-badge"));
   });
 });

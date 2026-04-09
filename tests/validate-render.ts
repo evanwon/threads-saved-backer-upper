@@ -74,6 +74,52 @@ const FIXTURES: GalleryPost[] = [
     text: "Video without poster",
     media: [{ type: "video", src: "https://example.com/video2.mp4" }],
   },
+  {
+    id: "5",
+    author: "@eve",
+    verified: false,
+    date: "2024-03-05T12:00:00.000Z",
+    url: "https://www.threads.net/post/5",
+    likes: 30,
+    replies: 2,
+    reposts: 1,
+    text: "Check out my note",
+    note: "This is a long note with detailed content.\n\nIt spans multiple paragraphs and contains useful information.",
+    media: [],
+  },
+  {
+    id: "6",
+    author: "@frank",
+    verified: false,
+    date: "2024-03-06T12:00:00.000Z",
+    url: "https://www.threads.net/post/6",
+    likes: 15,
+    replies: 1,
+    reposts: 3,
+    text: "This is such a great point",
+    media: [],
+    quotedPost: {
+      author: "@grace",
+      verified: true,
+      text: "Original thought here with some detail",
+      url: "https://www.threads.net/post/99",
+      media: [{ type: "image", src: "assets/6-q0.jpg" }],
+    },
+  },
+  {
+    id: "7",
+    author: "@eve",
+    verified: false,
+    date: "2024-03-07T12:00:00.000Z",
+    url: "https://www.threads.net/post/7",
+    likes: 8,
+    replies: 0,
+    reposts: 0,
+    text: "You should add this to your agents.md",
+    isReply: true,
+    replyToAuthor: "@frank",
+    media: [],
+  },
 ];
 
 async function validate(htmlPath?: string): Promise<void> {
@@ -146,6 +192,11 @@ async function validate(htmlPath?: string): Promise<void> {
     );
   }
 
+  // Check: reply banner renders for reply posts
+  const replyBanners = await page.locator(".reply-banner").count();
+  console.log(`Reply banners: ${replyBanners}`);
+  if (replyBanners === 0) errors.push("Reply banner not rendered for reply post");
+
   // Check: grid view works
   await page.click("#gridBtn");
   await page.waitForTimeout(200);
@@ -170,14 +221,34 @@ async function validate(htmlPath?: string): Promise<void> {
   const feedMode = await page.locator("#feed:not(.grid-mode)").count();
   if (feedMode === 0) errors.push("Feed mode did not activate");
 
-  // Check: search works
-  await page.fill("#search", "alice");
-  await page.waitForTimeout(300);
-  const filteredCount = await page.locator(".post").count();
-  console.log(`Posts after search "alice": ${filteredCount}`);
-  if (filteredCount === 0) errors.push("Search returned no results for 'alice'");
-  if (filteredCount >= postCount)
-    errors.push("Search did not filter results");
+  // Check: note embed renders (fixture data only — real data may not have notes)
+  const noteEmbeds = await page.locator(".note-embed").count();
+  if (!htmlPath) {
+    if (noteEmbeds === 0) errors.push("No .note-embed elements rendered");
+    const noteLabels = await page.locator(".note-label").count();
+    if (noteLabels === 0) errors.push("No .note-label elements rendered");
+  }
+  console.log(`Note embeds: ${noteEmbeds}`);
+
+  // Check: quote embed renders (fixture data only)
+  const quoteEmbeds = await page.locator(".quote-embed").count();
+  if (!htmlPath) {
+    if (quoteEmbeds === 0) errors.push("No .quote-embed elements rendered");
+    const quoteAuthors = await page.locator(".quote-author-name").count();
+    if (quoteAuthors === 0) errors.push("No .quote-author-name elements rendered");
+  }
+  console.log(`Quote embeds: ${quoteEmbeds}`);
+
+  // Check: search works (fixture data only — real data may not contain "alice")
+  if (!htmlPath) {
+    await page.fill("#search", "alice");
+    await page.waitForTimeout(300);
+    const filteredCount = await page.locator(".post").count();
+    console.log(`Posts after search "alice": ${filteredCount}`);
+    if (filteredCount === 0) errors.push("Search returned no results for 'alice'");
+    if (filteredCount >= postCount)
+      errors.push("Search did not filter results");
+  }
 
   await browser.close();
 

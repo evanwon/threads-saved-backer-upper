@@ -1,7 +1,7 @@
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { GalleryPost, GalleryMediaItem } from "./types.js";
+import type { GalleryPost, GalleryMediaItem, GalleryQuotedPost } from "./types.js";
 
 /**
  * Parse YAML frontmatter from a markdown file.
@@ -49,26 +49,95 @@ export function parseFrontmatter(
  * Extract post text and media items from the markdown body.
  * Detects image-before-video adjacency to pair thumbnails with videos.
  */
-export function parseBody(body: string): { text: string; media: GalleryMediaItem[] } {
+export function parseBody(body: string): { text: string; media: GalleryMediaItem[]; note?: string; quotedPost?: { author: string; verified: boolean; text: string; url: string; media: GalleryMediaItem[] } } {
   const lines = body.split("\n");
   const textLines: string[] = [];
+  const noteLines: string[] = [];
   const media: GalleryMediaItem[] = [];
   let pendingImage: string | null = null;
   let inText = true;
+  let inNote = false;
+  let inQuote = false;
+
+  // Quote repost state
+  let quoteAuthor = "";
+  let quoteVerified = false;
+  const quoteTextLines: string[] = [];
+  const quoteMedia: GalleryMediaItem[] = [];
+  let quoteUrl = "";
 
   const imageRegex = /^!\[.*?\]\(([^)]+)\)$/;
   const videoRegex = /^\[Video\]\(([^)]+)\)$/;
+  const noteStartRegex = /^>\s*\[!note\]/;
+  const quoteStartRegex = /^>\s*\[!quote\]\s*(.+)/;
 
   for (const line of lines) {
     const trimmed = line.trim();
 
     // Stop at footer separator
-    if (trimmed === "---" && (textLines.length > 0 || media.length > 0)) {
+    if (trimmed === "---" && (textLines.length > 0 || media.length > 0 || noteLines.length > 0 || quoteAuthor)) {
       if (pendingImage) {
         media.push({ type: "image", src: pendingImage });
         pendingImage = null;
       }
       break;
+    }
+
+    // Note callout detection
+    if (noteStartRegex.test(trimmed)) {
+      inNote = true;
+      inText = false;
+      continue;
+    }
+    if (inNote) {
+      if (trimmed.startsWith("> ")) {
+        noteLines.push(trimmed.slice(2));
+        continue;
+      } else if (trimmed === ">") {
+        noteLines.push("");
+        continue;
+      } else {
+        inNote = false;
+      }
+    }
+
+    // Quote callout detection
+    const quoteMatch = trimmed.match(quoteStartRegex);
+    if (quoteMatch) {
+      inQuote = true;
+      inText = false;
+      const authorStr = quoteMatch[1].trim();
+      if (authorStr.endsWith(" \u2713")) {
+        quoteAuthor = authorStr.slice(0, -2);
+        quoteVerified = true;
+      } else {
+        quoteAuthor = authorStr;
+        quoteVerified = false;
+      }
+      continue;
+    }
+    if (inQuote) {
+      if (trimmed.startsWith("> ")) {
+        const inner = trimmed.slice(2);
+        const qImg = inner.match(imageRegex);
+        const qVid = inner.match(videoRegex);
+        const qLink = inner.match(/^\[View quoted post\]\(([^)]+)\)$/);
+        if (qImg) {
+          quoteMedia.push({ type: "image", src: qImg[1] });
+        } else if (qVid) {
+          quoteMedia.push({ type: "video", src: qVid[1] });
+        } else if (qLink) {
+          quoteUrl = qLink[1];
+        } else {
+          quoteTextLines.push(inner);
+        }
+        continue;
+      } else if (trimmed === ">") {
+        quoteTextLines.push("");
+        continue;
+      } else {
+        inQuote = false;
+      }
     }
 
     const imgMatch = trimmed.match(imageRegex);
@@ -100,42 +169,51 @@ export function parseBody(body: string): { text: string; media: GalleryMediaItem
     media.push({ type: "image", src: pendingImage });
   }
 
-  return { text: textLines.join("\n").trim(), media };
+  const note = noteLines.length > 0 ? noteLines.join("\n").trim() : undefined;
+  const quotedPost = quoteAuthor
+    ? { author: quoteAuthor, verified: quoteVerified, text: quoteTextLines.join("\n").trim(), url: quoteUrl, media: quoteMedia }
+    : undefined;
+  return { text: textLines.join("\n").trim(), media, note, quotedPost };
 }
 
 /**
  * Scan the assets directory and group image files by post ID.
  */
-async function scanAssets(assetsDir: string): Promise<{ postImages: Map<string, string[]>; profilePics: Map<string, string> }> {
+async function scanAssets(assetsDir: string): Promise<{ postImages: Map<string, string[]>; quotedImages: Map<string, string[]>; profilePics: Map<string, string> }> {
   const postImages = new Map<string, string[]>();
-  const emptyResult = { postImages, profilePics: new Map<string, string>() };
+  const quotedImages = new Map<string, string[]>();
+  const emptyResult = { postImages, quotedImages, profilePics: new Map<string, string>() };
   if (!existsSync(assetsDir)) return emptyResult;
 
   const files = await readdir(assetsDir);
-  const imageRegex = /^(\d+)-(\d+)\.(jpe?g|png|webp|gif)$/i;
+  const imageRegex = /^(\d+)-(q?)(\d+)\.(jpe?g|png|webp|gif)$/i;
 
   for (const file of files) {
     const m = imageRegex.exec(file);
     if (!m) continue;
 
     const postId = m[1];
-    const existing = postImages.get(postId) || [];
+    const isQuoted = m[2] === "q";
+    const targetMap = isQuoted ? quotedImages : postImages;
+    const existing = targetMap.get(postId) || [];
     existing.push(`assets/${file}`);
-    postImages.set(postId, existing);
+    targetMap.set(postId, existing);
   }
 
   // Sort each array by the numeric index
-  for (const [, paths] of postImages) {
-    paths.sort((a, b) => {
-      const idxA = parseInt(a.match(/-(\d+)\.[^.]+$/)?.[1] || "0", 10);
-      const idxB = parseInt(b.match(/-(\d+)\.[^.]+$/)?.[1] || "0", 10);
-      return idxA - idxB;
-    });
+  for (const map of [postImages, quotedImages]) {
+    for (const [, paths] of map) {
+      paths.sort((a, b) => {
+        const idxA = parseInt(a.match(/-q?(\d+)\.[^.]+$/)?.[1] || "0", 10);
+        const idxB = parseInt(b.match(/-q?(\d+)\.[^.]+$/)?.[1] || "0", 10);
+        return idxA - idxB;
+      });
+    }
   }
 
   const profilePics = scanProfilePics(files);
 
-  return { postImages, profilePics };
+  return { postImages, quotedImages, profilePics };
 }
 
 /**
@@ -162,6 +240,7 @@ function scanProfilePics(files: string[]): Map<string, string> {
 async function readAllPosts(
   postsDir: string,
   assetMap: Map<string, string[]>,
+  quotedAssetMap: Map<string, string[]>,
   profilePicMap: Map<string, string>
 ): Promise<GalleryPost[]> {
   const files = await readdir(postsDir);
@@ -178,16 +257,37 @@ async function readAllPosts(
     }
 
     const { meta, body } = parsed;
-    const { text, media: parsedMedia } = parseBody(body);
+    const { text, media: parsedMedia, note, quotedPost: parsedQuote } = parseBody(body);
 
     // Use parsed media from body; fall back to asset map if body had no images
+    // (but skip fallback when a quoted post exists — the body is authoritative
+    // and the outer post genuinely has no media of its own)
     let media = parsedMedia;
-    if (media.length === 0) {
+    if (media.length === 0 && !parsedQuote) {
       const fallbackImages = assetMap.get(meta.id) || [];
       media = fallbackImages.map((src) => ({ type: "image" as const, src }));
     }
 
     const author = meta.author || "@unknown";
+
+    // Build quoted post from parsed body + frontmatter metadata
+    let quotedPost: GalleryQuotedPost | undefined;
+    if (parsedQuote) {
+      const qAuthor = parsedQuote.author || meta.quoted_author || "@unknown";
+      let qMedia = parsedQuote.media;
+      if (qMedia.length === 0) {
+        const fallbackQuoted = quotedAssetMap.get(meta.id) || [];
+        qMedia = fallbackQuoted.map((src) => ({ type: "image" as const, src }));
+      }
+      quotedPost = {
+        author: qAuthor,
+        verified: parsedQuote.verified || meta.quoted_verified === "true",
+        avatar: profilePicMap.get(qAuthor),
+        text: parsedQuote.text,
+        url: parsedQuote.url || meta.quoted_url || "",
+        media: qMedia,
+      };
+    }
 
     posts.push({
       id: meta.id || "",
@@ -200,7 +300,11 @@ async function readAllPosts(
       replies: parseInt(meta.replies, 10) || 0,
       reposts: parseInt(meta.reposts, 10) || 0,
       text,
+      note,
       media,
+      quotedPost,
+      isReply: meta.isReply === "true" || undefined,
+      replyToAuthor: meta.replyToAuthor || undefined,
     });
   }
 
@@ -300,11 +404,55 @@ img.avatar{object-fit:cover}
 .post-video{max-width:100%;border-radius:8px;margin-bottom:8px;display:block;background:#000}
 .metrics{display:flex;gap:16px;font-size:14px;color:var(--text2);margin-top:8px}
 .actions{display:flex;gap:16px;margin-top:8px;font-size:13px}
+.note-embed{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;padding:14px 16px;margin:8px 0 12px;
+}
+.note-label{
+  font-size:11px;font-weight:600;color:var(--accent);
+  text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;
+}
+.note-text{font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:var(--text2)}
+.quote-embed{
+  background:var(--surface);border:1px solid var(--border);
+  border-left:3px solid var(--accent);
+  border-radius:12px;padding:14px 16px;margin:8px 0 12px;
+}
+.quote-author-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.quote-avatar{
+  width:24px;height:24px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-weight:600;font-size:11px;flex-shrink:0;color:#fff;
+}
+img.quote-avatar{object-fit:cover}
+.quote-author-name{font-weight:600;font-size:13px}
+.quote-text{font-size:14px;line-height:1.5;white-space:pre-wrap;word-break:break-word;color:var(--text2)}
+.quote-media img{max-width:100%;border-radius:6px;margin-top:8px}
+.quote-media .video-container{margin-top:8px}
+.quote-media .post-video{max-width:100%;border-radius:6px;margin-top:8px}
+.quote-link{font-size:12px;color:var(--text3);margin-top:8px;display:inline-block}
+.quote-link:hover{color:var(--text)}
 .actions a,.actions button{
   color:var(--text3);background:none;border:none;font-size:13px;
   font-family:var(--font);cursor:pointer;padding:0;
 }
 .actions a:hover,.actions button:hover{color:var(--text)}
+
+/* Reply indicator */
+.reply-banner{
+  display:flex;align-items:center;gap:6px;
+  padding:8px 12px;margin-bottom:10px;
+  border-left:3px solid var(--accent);
+  background:rgba(0,149,246,.06);border-radius:0 8px 8px 0;
+  font-size:13px;color:var(--text2);
+}
+.reply-banner .reply-icon{flex-shrink:0;opacity:.6}
+.reply-banner .reply-author{color:var(--accent);font-weight:600}
+.reply-badge{
+  position:absolute;top:8px;left:8px;
+  background:rgba(0,149,246,.85);backdrop-filter:blur(4px);
+  color:#fff;font-size:11px;padding:3px 8px;border-radius:12px;
+}
 
 /* Grid */
 #feed.grid-mode{
@@ -341,7 +489,8 @@ img.avatar{object-fit:cover}
 #feed:not(.grid-mode) .post .grid-cover,
 #feed:not(.grid-mode) .post .grid-text-cover,
 #feed:not(.grid-mode) .post .grid-overlay,
-#feed:not(.grid-mode) .post .badge{display:none}
+#feed:not(.grid-mode) .post .badge,
+#feed:not(.grid-mode) .post .reply-badge{display:none}
 #feed.grid-mode .sentinel{grid-column:1/-1;height:1px;overflow:hidden;padding:0}
 .sentinel{padding:40px;text-align:center}
 
@@ -363,6 +512,21 @@ img.avatar{object-fit:cover}
   display:flex;align-items:center;justify-content:center;
 }
 .modal-close:hover{background:rgba(255,255,255,.25)}
+
+/* Scroll to top */
+.scroll-top{
+  position:fixed;bottom:24px;right:24px;z-index:150;
+  width:40px;height:40px;border-radius:50%;border:none;
+  background:rgba(255,255,255,.15);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  color:#fff;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  opacity:0;transform:translateY(12px);
+  transition:opacity .25s,transform .25s,background .15s;
+  pointer-events:none;
+}
+.scroll-top.visible{opacity:1;transform:translateY(0);pointer-events:auto}
+.scroll-top:hover{background:rgba(255,255,255,.25);transform:scale(1.1)}
+.scroll-top:active{transform:scale(.95)}
 
 /* Responsive */
 @media(max-width:720px){
@@ -392,6 +556,10 @@ img.avatar{object-fit:cover}
 </div>
 <div class="stats" id="stats"></div>
 <div id="feed"></div>
+
+<button class="scroll-top" id="scrollTop" aria-label="Scroll to top" onclick="scrollToTop()">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+</button>
 
 <script>
 const POSTS=` + postsJson + `;
@@ -474,7 +642,8 @@ function applyFilters(){
   filtered=POSTS.filter(function(p){
     if(authorFilter&&p.author!==authorFilter)return false;
     if(searchQuery){
-      if(p.text.toLowerCase().indexOf(searchQuery)===-1&&p.author.toLowerCase().indexOf(searchQuery)===-1)return false;
+      var haystack=p.text.toLowerCase()+" "+p.author.toLowerCase()+(p.note?" "+p.note.toLowerCase():"")+(p.quotedPost?" "+p.quotedPost.text.toLowerCase()+" "+p.quotedPost.author.toLowerCase():"");
+      if(haystack.indexOf(searchQuery)===-1)return false;
     }
     return true;
   });
@@ -544,6 +713,58 @@ function renderAvatarHtml(p){
   return avatarFallbackHtml(p.author);
 }
 
+function renderNoteHtml(p){
+  if(!p.note)return"";
+  return '<div class="note-embed"><div class="note-label">Note</div>'
+    +'<div class="note-text">'+linkify(p.note)+'</div></div>';
+}
+
+function renderQuoteHtml(p){
+  if(!p.quotedPost)return"";
+  var q=p.quotedPost;
+  var qAuthor=esc(stripAt(q.author));
+  var qBadge=q.verified?verifiedSvg:"";
+  var avatarHtml;
+  if(q.avatar){
+    avatarHtml='<img class="quote-avatar" src="'+esc(q.avatar)+'" loading="lazy" alt="">';
+  }else{
+    var initial=stripAt(q.author).charAt(0).toUpperCase();
+    avatarHtml='<div class="quote-avatar" style="background:'+avatarColor(q.author)+'">'+initial+'</div>';
+  }
+  var mediaHtml="";
+  if(q.media&&q.media.length>0){
+    mediaHtml='<div class="quote-media">';
+    for(var i=0;i<q.media.length;i++){
+      var m=q.media[i];
+      if(m.type==="image"){
+        mediaHtml+='<img src="'+esc(m.src)+'" loading="lazy" alt="">';
+      }else if(m.poster){
+        mediaHtml+='<div class="video-container" data-video="'+esc(m.src)+'" onclick="playVideo(event,this)">'
+          +'<img src="'+esc(m.poster)+'" loading="lazy" alt="">'
+          +'<div class="play-overlay">'+playSvg+'</div></div>';
+      }else{
+        mediaHtml+='<video class="post-video" controls playsinline preload="metadata">'
+          +'<source src="'+esc(m.src)+'" type="video/mp4"></video>';
+      }
+    }
+    mediaHtml+='</div>';
+  }
+  var linkHtml=q.url?'<a class="quote-link" href="'+esc(q.url)+'" target="_blank" rel="noopener">View on Threads &#8599;</a>':"";
+  return '<div class="quote-embed">'
+    +'<div class="quote-author-row">'+avatarHtml
+    +'<span class="quote-author-name">'+qAuthor+'</span>'+qBadge+'</div>'
+    +(q.text?'<div class="quote-text">'+linkify(q.text)+'</div>':'')
+    +mediaHtml+linkHtml+'</div>';
+}
+
+var replySvg='<svg class="reply-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17l-5-5 5-5"/><path d="M4 12h11a4 4 0 0 1 0 8h-1"/></svg>';
+
+function renderReplyBanner(p){
+  if(!p.isReply)return"";
+  var label=p.replyToAuthor?"Replying to <span class=\\"reply-author\\">"+esc(stripAt(p.replyToAuthor))+"</span>":"Reply to another post";
+  return '<div class="reply-banner">'+replySvg+' '+label+'</div>';
+}
+
 function renderPost(p){
   var author=esc(stripAt(p.author));
   var vBadge=p.verified?verifiedSvg:"";
@@ -558,6 +779,13 @@ function renderPost(p){
       else if(m.poster)firstCoverSrc=m.poster;
     }
   }
+  if(!firstCoverSrc&&p.quotedPost&&p.quotedPost.media){
+    for(var j=0;j<p.quotedPost.media.length;j++){
+      var qm=p.quotedPost.media[j];
+      if(qm.type==="image"){firstCoverSrc=qm.src;break}
+      else if(qm.poster){firstCoverSrc=qm.poster;break}
+    }
+  }
 
   var gridCover="";
   var badge="";
@@ -566,13 +794,15 @@ function renderPost(p){
   }else if(hasVideo){
     gridCover='<div class="grid-text-cover" style="background:var(--surface)">'+playSvg+'</div>';
   }else{
-    gridCover='<div class="grid-text-cover">'+esc(p.text.slice(0,200))+'</div>';
+    var coverText=p.text||(p.note?p.note:"");
+    gridCover='<div class="grid-text-cover">'+esc(coverText.slice(0,200))+'</div>';
   }
   if(p.media.length>1)badge='<span class="badge">1/'+p.media.length+'</span>';
   else if(hasVideo)badge='<span class="badge">&#9654; video</span>';
+  var replyBadge=p.isReply?'<span class="reply-badge">&#8617; reply</span>':"";
 
   return '<div class="post" data-id="'+esc(p.id)+'" onclick="handlePostClick(event,this)">'
-    +gridCover+badge
+    +gridCover+badge+replyBadge
     +'<div class="grid-overlay"><span class="grid-author">'+author+'</span> &middot; '+esc(dateStr)
     +(p.media.length>1?' &middot; &#10084; '+fmtNum(p.likes):'')+'</div>'
     +'<div class="feed-content">'
@@ -580,7 +810,10 @@ function renderPost(p){
     +renderAvatarHtml(p)
     +'<div><span class="author-name">'+author+'</span>'+vBadge+'</div>'
     +'<span class="date">'+esc(dateStr)+'</span></div>'
+    +renderReplyBanner(p)
     +(p.text?'<div class="post-text">'+linkify(p.text)+'</div>':'')
+    +renderNoteHtml(p)
+    +renderQuoteHtml(p)
     +renderMediaHtml(p)
     +'<div class="metrics"><span>&#10084; '+fmtNum(p.likes)+'</span><span>&#128172; '+fmtNum(p.replies)+'</span><span>&#128260; '+fmtNum(p.reposts)+'</span></div>'
     +'<div class="actions">'
@@ -616,7 +849,10 @@ function openModal(p){
     +'<div><span class="author-name">'+author+'</span>'+vBadge+'</div>'
     +'<span class="date">'+esc(dateStr)+'</span></div>'
     +'<div style="padding:12px 16px 16px">'
+    +renderReplyBanner(p)
     +(p.text?'<div class="post-text">'+linkify(p.text)+'</div>':'')
+    +renderNoteHtml(p)
+    +renderQuoteHtml(p)
     +renderMediaHtml(p)
     +'<div class="metrics"><span>&#10084; '+fmtNum(p.likes)+'</span><span>&#128172; '+fmtNum(p.replies)+'</span><span>&#128260; '+fmtNum(p.reposts)+'</span></div>'
     +'<div class="actions">'
@@ -671,6 +907,17 @@ document.addEventListener("keydown",function(e){
   if(e.key==="Escape")closeModal();
 });
 
+function scrollToTop(){
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+(function(){
+  var btn=document.getElementById("scrollTop");
+  if(!btn)return;
+  window.addEventListener("scroll",function(){
+    btn.classList.toggle("visible",window.scrollY>400);
+  },{passive:true});
+})();
+
 document.addEventListener("DOMContentLoaded",init);
 </script>
 </body>
@@ -691,8 +938,8 @@ export async function generateGallery(outputDir: string): Promise<void> {
     return;
   }
 
-  const { postImages, profilePics } = await scanAssets(assetsDir);
-  const posts = await readAllPosts(postsDir, postImages, profilePics);
+  const { postImages, quotedImages, profilePics } = await scanAssets(assetsDir);
+  const posts = await readAllPosts(postsDir, postImages, quotedImages, profilePics);
 
   if (posts.length === 0) {
     console.log("No posts found, skipping gallery generation.");

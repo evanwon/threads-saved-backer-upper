@@ -113,6 +113,81 @@ function processJson(
   return { newCount, hitKnown };
 }
 
+/**
+ * Scrape a single post by navigating directly to its URL.
+ * Captures API responses triggered by page load.
+ */
+export async function scrapeSinglePost(
+  context: BrowserContext,
+  postUrl: string
+): Promise<unknown[]> {
+  const page = await context.newPage();
+  const collectedItems: unknown[] = [];
+  const seenIds = new Set<string>();
+
+  page.on("response", async (response) => {
+    const url = response.url();
+    if (
+      !url.includes("/api/graphql") &&
+      !url.includes("/graphql") &&
+      !url.includes("/api/v1/")
+    ) return;
+
+    try {
+      const body = await response.text();
+      const cleaned = body.replace(/^for\s*\(;;\)\s*;\s*/, "");
+      const jsonTexts: string[] = [];
+
+      try {
+        JSON.parse(cleaned);
+        jsonTexts.push(cleaned);
+      } catch {
+        for (const line of cleaned.split("\n")) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+            try {
+              JSON.parse(trimmed);
+              jsonTexts.push(trimmed);
+            } catch { /* skip */ }
+          }
+        }
+      }
+
+      for (const text of jsonTexts) {
+        const json = JSON.parse(text);
+        processJson(json, seenIds, new Set(), collectedItems);
+      }
+    } catch { /* skip */ }
+  });
+
+  try {
+    console.log(`Navigating to ${postUrl}...`);
+    await page.goto(postUrl, { waitUntil: "networkidle" });
+    await page.waitForTimeout(3000);
+
+    // Extract from initial script tags
+    const scriptData = await page.evaluate(() => {
+      const scripts = document.querySelectorAll(
+        'script[type="application/json"][data-sjs]'
+      );
+      return Array.from(scripts).map((s) => s.textContent);
+    });
+
+    for (const text of scriptData) {
+      if (!text) continue;
+      try {
+        const json = JSON.parse(text);
+        processJson(json, seenIds, new Set(), collectedItems);
+      } catch { /* skip */ }
+    }
+
+    console.log(`Collected ${collectedItems.length} post(s) from ${postUrl}`);
+    return collectedItems;
+  } finally {
+    await page.close();
+  }
+}
+
 export async function scrapeSavedPosts(
   context: BrowserContext,
   knownPostIds: Set<string>

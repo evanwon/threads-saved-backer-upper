@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/index.ts",
-    "test": "tsx --test tests/gallery.test.ts",
-    "validate": "tsx tests/validate-render.ts"
+    "test": "tsx --test tests/gallery.test.ts tests/parser.test.ts",
+    "validate": "tsx tests/validate-render.ts",
+    "serve": "tsx src/server.ts"
   },
   "dependencies": {
     "playwright": "^1.50.0"

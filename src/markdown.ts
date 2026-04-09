@@ -71,12 +71,61 @@ function generateMarkdownContent(post: PostData): string {
   lines.push(`replies: ${post.replies}`);
   lines.push(`reposts: ${post.reposts}`);
   lines.push(`source: threads`);
+  if (post.quotedPost) {
+    lines.push(`quoted_author: ${yamlString(post.quotedPost.author)}`);
+    lines.push(`quoted_verified: ${post.quotedPost.authorVerified}`);
+    if (post.quotedPost.url) {
+      lines.push(`quoted_url: ${yamlString(post.quotedPost.url)}`);
+    }
+  }
+  if (post.isReply) {
+    lines.push(`isReply: true`);
+    if (post.replyToAuthor) {
+      lines.push(`replyToAuthor: ${yamlString(post.replyToAuthor)}`);
+    }
+  }
   lines.push("---");
   lines.push("");
 
   // Post text
   if (post.text) {
     lines.push(post.text);
+    lines.push("");
+  }
+
+  // Note (embedded long-form text)
+  if (post.note) {
+    lines.push("> [!note]");
+    for (const noteLine of post.note.split("\n")) {
+      lines.push(`> ${noteLine}`);
+    }
+    lines.push("");
+  }
+
+  // Quoted post (quote repost)
+  if (post.quotedPost) {
+    const qp = post.quotedPost;
+    const verifiedMark = qp.authorVerified ? " \u2713" : "";
+    lines.push(`> [!quote] ${qp.author}${verifiedMark}`);
+    if (qp.text) {
+      for (const qLine of qp.text.split("\n")) {
+        lines.push(`> ${qLine}`);
+      }
+    }
+    for (const item of qp.media) {
+      lines.push(">");
+      if (item.type === "image" && item.localPath) {
+        lines.push(`> ![](${item.localPath.replace(/\\/g, "/")})`);
+      } else if (item.type === "video") {
+        lines.push(`> [Video](${item.url})`);
+      } else if (item.type === "image") {
+        lines.push(`> ![](${item.url})`);
+      }
+    }
+    if (qp.url) {
+      lines.push(">");
+      lines.push(`> [View quoted post](${qp.url})`);
+    }
     lines.push("");
   }
 

@@ -34,7 +34,7 @@ export async function downloadImages(
   const assetsDir = resolve(outputDir, "assets");
 
   // Build download queue
-  const queue: { post: PostData; mediaIndex: number; dest: string }[] = [];
+  const queue: { post: PostData; mediaIndex: number; dest: string; quoted?: boolean }[] = [];
 
   for (const post of posts) {
     for (let i = 0; i < post.media.length; i++) {
@@ -47,6 +47,21 @@ export async function downloadImages(
 
       item.localPath = join("assets", filename);
       queue.push({ post, mediaIndex: i, dest });
+    }
+
+    // Quoted post images (use "q" prefix to distinguish from outer media)
+    if (post.quotedPost) {
+      for (let i = 0; i < post.quotedPost.media.length; i++) {
+        const item = post.quotedPost.media[i];
+        if (item.type !== "image") continue;
+
+        const ext = item.url.match(/\.(jpe?g|png|webp|gif)/i)?.[1] ?? "jpg";
+        const filename = `${post.id}-q${i}.${ext}`;
+        const dest = join(assetsDir, filename);
+
+        item.localPath = join("assets", filename);
+        queue.push({ post, mediaIndex: i, dest, quoted: true });
+      }
     }
   }
 
@@ -68,15 +83,16 @@ export async function downloadImages(
         skipped++;
         return;
       }
+      const mediaArr = job.quoted ? job.post.quotedPost!.media : job.post.media;
       try {
-        await downloadFile(job.post.media[job.mediaIndex].url, job.dest);
+        await downloadFile(mediaArr[job.mediaIndex].url, job.dest);
         completed++;
       } catch (err) {
         console.error(
           `Failed to download image for post ${job.post.id}: ${err}`
         );
         // Clear localPath on failure so markdown won't reference missing file
-        job.post.media[job.mediaIndex].localPath = undefined;
+        mediaArr[job.mediaIndex].localPath = undefined;
       }
     })();
 
@@ -111,6 +127,9 @@ export async function downloadProfilePics(
   for (const post of posts) {
     if (post.profilePicUrl && !authorPics.has(post.author)) {
       authorPics.set(post.author, post.profilePicUrl);
+    }
+    if (post.quotedPost?.profilePicUrl && !authorPics.has(post.quotedPost.author)) {
+      authorPics.set(post.quotedPost.author, post.quotedPost.profilePicUrl);
     }
   }
 

@@ -30,10 +30,14 @@ export async function saveConfig(config: Config): Promise<void> {
  * Parse CLI args and merge with saved config.
  * Priority: --output flag > config.json > default ./output
  */
-export async function resolveConfig(): Promise<Config & { galleryOnly: boolean }> {
+export async function resolveConfig(): Promise<Config & { galleryOnly: boolean; dumpRaw: boolean; reset: boolean; resetAll: boolean; url?: string }> {
   const config = await loadConfig();
   const args = process.argv.slice(2);
   let galleryOnly = false;
+  let dumpRaw = false;
+  let reset = false;
+  let resetAll = false;
+  let url: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     if ((args[i] === "--output" || args[i] === "-o") && args[i + 1]) {
@@ -47,7 +51,21 @@ export async function resolveConfig(): Promise<Config & { galleryOnly: boolean }
     if (args[i] === "--gallery-only") {
       galleryOnly = true;
     }
+    if (args[i] === "--dump-raw") {
+      dumpRaw = true;
+    }
+    if (args[i] === "--reset") {
+      reset = true;
+    }
+    if (args[i] === "--reset-all") {
+      resetAll = true;
+      reset = true;
+    }
+    if (args[i] === "--url" && args[i + 1]) {
+      url = args[i + 1];
+      i++;
+    }
   }
 
-  return { ...config, galleryOnly };
+  return { ...config, galleryOnly, dumpRaw, reset, resetAll, url };
 }
