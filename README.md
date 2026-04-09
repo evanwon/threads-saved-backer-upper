@@ -153,6 +153,8 @@ src/
   markdown.ts     Generate .md files with YAML frontmatter
   gallery.ts      Generate self-contained HTML gallery viewer
   state.ts        Read/write state.json for incremental tracking
+  pipeline.ts     Reusable scrape pipeline with progress callback
+  server.ts       Local HTTP server for serve mode (npm run serve)
   types.ts        TypeScript interfaces
 ```
 

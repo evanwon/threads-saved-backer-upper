@@ -24,7 +24,7 @@ Threadsafe is a TypeScript CLI tool that backs up saved Threads posts as Obsidia
 - `npm start -- --reset-all` — Same as `--reset` but also deletes assets (full clean slate).
 - `npm run serve` — Start local gallery server at localhost:3000 with in-app refresh button
 - `npx tsc --noEmit` — Type check without emitting
-- `npm test` — Run unit tests (`tests/gallery.test.ts`)
+- `npm test` — Run unit tests (`tests/gallery.test.ts`, `tests/parser.test.ts`)
 - `npm run validate` — Run Playwright render validation (generates gallery from fixtures, opens in headless Chromium, checks for JS errors)
 - `npm run validate -- path/to/index.html` — Validate an existing gallery file
 
