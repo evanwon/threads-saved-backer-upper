@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { BackupState } from "./types.js";
 
-const STATE_PATH = resolve("state.json");
+export const STATE_PATH = resolve("state.json");
 
 export async function loadState(): Promise<BackupState> {
   if (!existsSync(STATE_PATH)) {

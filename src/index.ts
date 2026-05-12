@@ -9,6 +9,7 @@ import { generateMarkdownFiles } from "./markdown.js";
 import { resolveConfig } from "./config.js";
 import { generateGallery } from "./gallery.js";
 import { runPipeline } from "./pipeline.js";
+import { STATE_PATH } from "./state.js";
 
 async function main() {
   console.log("Threadsafe\n");
@@ -28,7 +29,6 @@ async function main() {
     const postsDir = resolve(OUTPUT_DIR, "posts");
     const assetsDir = resolve(OUTPUT_DIR, "assets");
     const galleryPath = resolve(OUTPUT_DIR, "index.html");
-    const statePath = resolve("state.json");
 
     let postsDeleted = 0;
     if (existsSync(postsDir)) {
@@ -36,7 +36,7 @@ async function main() {
       postsDeleted = files.filter((f) => f.endsWith(".md")).length;
       await rm(postsDir, { recursive: true });
     }
-    if (existsSync(statePath)) await rm(statePath);
+    if (existsSync(STATE_PATH)) await rm(STATE_PATH);
     if (existsSync(galleryPath)) await rm(galleryPath);
 
     if (config.resetAll && existsSync(assetsDir)) {
@@ -77,14 +77,11 @@ async function main() {
   }
 
   if (config.url) {
+    // Single-post scrape: parse + download + markdown + gallery regen.
+    // Does NOT update state.json — this mode is for ad-hoc fetches.
     const { context, closeBrowser } = await authenticate();
     try {
       const rawItems = await scrapeSinglePost(context, config.url);
-      if (config.dumpRaw) {
-        const dumpPath = resolve(OUTPUT_DIR, "raw-dump.json");
-        await writeFile(dumpPath, JSON.stringify(rawItems, null, 2), "utf-8");
-        console.log(`Raw data dumped to ${dumpPath}`);
-      }
       const posts = parseThreadsData(rawItems);
       console.log(`Parsed ${posts.length} post(s).`);
       if (posts.length > 0) {
