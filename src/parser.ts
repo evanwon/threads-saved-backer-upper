@@ -31,6 +31,34 @@ function getNumber(obj: unknown, ...keys: string[]): number {
 }
 
 /**
+ * Keys whose subtrees must NOT be walked when scanning for post media.
+ * These commonly contain unrelated image/video fields that would otherwise
+ * get attributed to the outer post:
+ *  - user, reply_to_author: profile pics
+ *  - quoted_post: belongs to the embedded quoted post, handled separately
+ *  - preview_comments, comments, reply_facepile_users: other users' avatars
+ *  - music_metadata, music_info, original_sound_info: audio artwork
+ *  - sharing_friction_info, friction_info, disclaimer_info: policy banners
+ *  - link_preview_attachment, attached_story: external media previews
+ */
+const MEDIA_RECURSION_DENYLIST = new Set([
+  "user",
+  "reply_to_author",
+  "quoted_post",
+  "preview_comments",
+  "comments",
+  "reply_facepile_users",
+  "music_metadata",
+  "music_info",
+  "original_sound_info",
+  "sharing_friction_info",
+  "friction_info",
+  "disclaimer_info",
+  "link_preview_attachment",
+  "attached_story",
+]);
+
+/**
  * Recursively search a post object for video_versions and image_versions2 keys.
  * Used as a fallback when fixed-path extraction finds no media — handles embedded
  * Instagram content (reels, reposts, quoted posts) where media is nested deeper.
@@ -69,10 +97,9 @@ function findMediaRecursive(
       }
     }
 
-    // Recurse into all values, skipping "user" (profile pics) and "quoted_post"
-    // (media belongs to the quoted post, not the outer post)
+    // Recurse into remaining values, skipping known-unrelated subtrees
     for (const [key, value] of Object.entries(record)) {
-      if (key === "user" || key === "quoted_post") continue;
+      if (MEDIA_RECURSION_DENYLIST.has(key)) continue;
       findMediaRecursive(value, results, depth + 1);
     }
   }
@@ -143,6 +170,24 @@ function extractMedia(post: Record<string, unknown>): MediaItem[] {
 }
 
 /**
+ * Join a text_fragments.fragments array by concatenating the plaintext field
+ * of each fragment. Threads embeds newlines and spacing *inside* the plaintext
+ * of each fragment, so fragments are always joined with no separator.
+ */
+function joinFragments(fragments: unknown[]): string {
+  const parts: string[] = [];
+  for (const frag of fragments) {
+    if (frag && typeof frag === "object") {
+      const plaintext = (frag as Record<string, unknown>).plaintext;
+      if (typeof plaintext === "string") {
+        parts.push(plaintext);
+      }
+    }
+  }
+  return parts.join("");
+}
+
+/**
  * Reconstruct post text from text_fragments when available.
  * The Threads API's caption.text field can lose characters (e.g. stripping
  * '@' from '@AGENTS.md'). The text_fragments array in text_post_app_info
@@ -156,18 +201,23 @@ function getTextFromFragments(post: Record<string, unknown>): string | null {
   if (!tf) return null;
   const fragments = tf.fragments;
   if (!Array.isArray(fragments) || fragments.length === 0) return null;
-
-  const parts: string[] = [];
-  for (const frag of fragments) {
-    if (frag && typeof frag === "object") {
-      const plaintext = (frag as Record<string, unknown>).plaintext;
-      if (typeof plaintext === "string") {
-        parts.push(plaintext);
-      }
-    }
-  }
-  const result = parts.join("");
+  const result = joinFragments(fragments);
   return result || null;
+}
+
+/**
+ * Extract the "note" / long-form snippet text attached to a post, if any.
+ * Threads stores this under text_post_app_info.snippet_attachment_info as a
+ * parallel text_fragments structure.
+ */
+function getNoteFromSnippet(post: Record<string, unknown>): string | undefined {
+  const tpai = post.text_post_app_info as Record<string, unknown> | undefined;
+  const snippet = tpai?.snippet_attachment_info as Record<string, unknown> | undefined;
+  const tf = snippet?.text_fragments as Record<string, unknown> | undefined;
+  const fragments = tf?.fragments;
+  if (!Array.isArray(fragments) || fragments.length === 0) return undefined;
+  const result = joinFragments(fragments);
+  return result || undefined;
 }
 
 /**
@@ -205,15 +255,10 @@ function parseItem(raw: unknown): PostData | null {
       ? getString(caption, "text")
       : getString(post, "text") || getString(post, "caption", "text"));
 
-  // Note content (Threads "snippet" / long-form note attachment)
   const textPostAppInfo = post.text_post_app_info as Record<string, unknown> | undefined;
-  const snippetInfo = textPostAppInfo?.snippet_attachment_info as Record<string, unknown> | undefined;
-  const snippetFragments = snippetInfo?.text_fragments as Record<string, unknown> | undefined;
-  const fragments = snippetFragments?.fragments as unknown[] | undefined;
-  const note = fragments
-    ?.map((f) => (f && typeof f === "object" ? getString(f as Record<string, unknown>, "plaintext") : ""))
-    .filter(Boolean)
-    .join("\n") || undefined;
+
+  // Note content (Threads "snippet" / long-form note attachment)
+  const note = getNoteFromSnippet(post);
 
   // Timestamp
   const takenAt = post.taken_at as number | undefined;

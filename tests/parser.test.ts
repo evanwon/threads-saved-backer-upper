@@ -167,6 +167,28 @@ describe("parseThreadsData — media extraction", () => {
     assert.equal(posts[0].media.length, 0);
   });
 
+  it("does not extract media from denylisted subtrees", () => {
+    // Each of these subtrees has historically leaked profile pics, audio
+    // artwork, or other unrelated media into the outer post's media array.
+    const items = [threadItem({
+      reply_to_author: {
+        image_versions2: { candidates: [{ url: "https://cdn/avatar-reply.jpg" }] },
+      },
+      preview_comments: [
+        { image_versions2: { candidates: [{ url: "https://cdn/avatar-comment.jpg" }] } },
+      ],
+      music_metadata: {
+        image_versions2: { candidates: [{ url: "https://cdn/music-art.jpg" }] },
+      },
+      link_preview_attachment: {
+        image_versions2: { candidates: [{ url: "https://cdn/link-preview.jpg" }] },
+      },
+    })];
+    const posts = parseThreadsData(items);
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].media.length, 0);
+  });
+
   it("returns empty media for text-only post", () => {
     const items = [threadItem({})];
     const posts = parseThreadsData(items);
@@ -192,13 +214,14 @@ describe("parseThreadsData — media extraction", () => {
   });
 
   it("extracts note from snippet_attachment_info", () => {
+    // Threads embeds newlines *inside* the plaintext of each fragment and
+    // fragments are joined with no separator (same as the main text path).
     const items = [threadItem({
       text_post_app_info: {
         snippet_attachment_info: {
           text_fragments: {
             fragments: [
-              { plaintext: "First paragraph of the note." },
-              { plaintext: "Second paragraph." },
+              { plaintext: "First paragraph of the note.\n\nSecond paragraph." },
             ],
           },
         },
@@ -206,7 +229,27 @@ describe("parseThreadsData — media extraction", () => {
     })];
     const posts = parseThreadsData(items);
     assert.equal(posts.length, 1);
-    assert.equal(posts[0].note, "First paragraph of the note.\nSecond paragraph.");
+    assert.equal(posts[0].note, "First paragraph of the note.\n\nSecond paragraph.");
+  });
+
+  it("concatenates multiple note fragments without adding separators", () => {
+    // Fragments split mid-paragraph (e.g. around a link) must join cleanly
+    // without spurious whitespace/newlines between them.
+    const items = [threadItem({
+      text_post_app_info: {
+        snippet_attachment_info: {
+          text_fragments: {
+            fragments: [
+              { plaintext: "See " },
+              { plaintext: "example.com" },
+              { plaintext: " for details." },
+            ],
+          },
+        },
+      },
+    })];
+    const posts = parseThreadsData(items);
+    assert.equal(posts[0].note, "See example.com for details.");
   });
 
   it("returns undefined note when snippet_attachment_info is null", () => {
