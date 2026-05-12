@@ -39,6 +39,7 @@ export async function runPipeline(
   onProgress("scrape", `Loaded state: ${knownIds.size} previously backed-up posts`);
 
   let newPostCount = 0;
+  let totalPostCount = state.backedUpPostIds.length;
   let errorMessage: string | undefined;
 
   try {
@@ -56,8 +57,6 @@ export async function runPipeline(
       if (posts.length === 0) {
         onProgress("parse", "No posts could be parsed from scraped data");
       } else {
-        newPostCount = posts.length;
-
         // Download images and profile pictures
         onProgress("download", "Downloading images...");
         const postsWithImages = await downloadImages(posts, outputDir);
@@ -69,14 +68,17 @@ export async function runPipeline(
         const written = await generateMarkdownFiles(postsWithImages, outputDir);
         onProgress("markdown", `Wrote ${written} markdown files`);
 
-        // Update state
+        // Update state. newPostCount is the delta against state, not posts.length —
+        // a post can be re-parsed on a retry but already exist in state.
         onProgress("state", "Updating backup state...");
         const newPostIds = posts.map((p) => p.id);
         const updatedState = addBackedUpPosts(state, newPostIds);
         await saveState(updatedState);
+        newPostCount = updatedState.backedUpPostIds.length - state.backedUpPostIds.length;
+        totalPostCount = updatedState.backedUpPostIds.length;
         onProgress(
           "state",
-          `State updated: ${updatedState.backedUpPostIds.length} total backed-up posts`
+          `State updated: ${totalPostCount} total backed-up posts`
         );
       }
     }
@@ -99,12 +101,10 @@ export async function runPipeline(
   onProgress("gallery", "Regenerating gallery...");
   await generateGallery(outputDir);
 
-  const totalPosts = state.backedUpPostIds.length + newPostCount;
-
   if (errorMessage) {
-    return { newPosts: newPostCount, totalPosts, error: errorMessage };
+    return { newPosts: newPostCount, totalPosts: totalPostCount, error: errorMessage };
   }
 
   onProgress("done", `Complete — ${newPostCount} new posts backed up`);
-  return { newPosts: newPostCount, totalPosts };
+  return { newPosts: newPostCount, totalPosts: totalPostCount };
 }
