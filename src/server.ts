@@ -1,6 +1,6 @@
 import { createServer, type ServerResponse } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
-import { join, extname, resolve } from "node:path";
+import { join, extname, resolve, relative, isAbsolute } from "node:path";
 import { execFile } from "node:child_process";
 import { loadConfig } from "./config.js";
 import { generateGallery } from "./gallery.js";
@@ -25,7 +25,12 @@ const sseClients = new Set<ServerResponse>();
 function broadcast(data: { type: string; [key: string]: unknown }) {
   const message = `data: ${JSON.stringify(data)}\n\n`;
   for (const client of sseClients) {
-    client.write(message);
+    try {
+      client.write(message);
+    } catch {
+      // Client socket is dead; drop it so we don't retry next broadcast.
+      sseClients.delete(client);
+    }
   }
 }
 
@@ -102,11 +107,16 @@ const REFRESH_UI_INJECTION = `
   var detailEl=document.getElementById("refreshDetail");
   var spinnerEl=document.getElementById("refreshSpinner");
   var evtSource=null;
+  // Only the tab that clicked "refresh" should react to progress events.
+  // Without this, other open tabs would also show the modal and reload,
+  // clobbering whatever the user was doing there.
+  var didInitiate=false;
 
   function connectSSE(){
     if(evtSource)return;
     evtSource=new EventSource("/api/events");
     evtSource.addEventListener("message",function(e){
+      if(!didInitiate)return;
       var data=JSON.parse(e.data);
       if(data.type==="progress"){
         stepEl.textContent=data.step;
@@ -122,6 +132,7 @@ const REFRESH_UI_INJECTION = `
         detailEl.textContent=data.newPosts+" new post"+(data.newPosts===1?"":"s")+" backed up";
         btn.disabled=false;
         btn.classList.remove("spinning");
+        didInitiate=false;
         setTimeout(function(){location.reload()},1500);
       }
       if(data.type==="error"){
@@ -139,6 +150,7 @@ const REFRESH_UI_INJECTION = `
         detailEl.appendChild(retry);
         btn.disabled=false;
         btn.classList.remove("spinning");
+        didInitiate=false;
       }
     });
   }
@@ -156,19 +168,22 @@ const REFRESH_UI_INJECTION = `
     overlay.classList.add("visible");
     btn.disabled=true;
     btn.classList.add("spinning");
+    didInitiate=true;
     connectSSE();
     fetch("/api/refresh",{method:"POST"}).then(function(res){
       if(res.status===409){
         stepEl.textContent="Already running";
-        detailEl.textContent="A refresh is already in progress";
+        detailEl.textContent="A refresh is already in progress in another tab";
         btn.disabled=false;
         btn.classList.remove("spinning");
+        didInitiate=false;
       }
     }).catch(function(err){
       stepEl.textContent="Error";
       detailEl.textContent="Could not reach server: "+err.message;
       btn.disabled=false;
       btn.classList.remove("spinning");
+      didInitiate=false;
     });
   }
 
@@ -230,7 +245,11 @@ async function main() {
       });
       res.write(":\n\n"); // SSE comment to establish connection
       sseClients.add(res);
+      // Any of these can fire when the client goes away; all must drop the client
+      // so a later broadcast doesn't write to a dead socket and crash the server.
       req.on("close", () => sseClients.delete(res));
+      res.on("error", () => sseClients.delete(res));
+      res.on("close", () => sseClients.delete(res));
       return;
     }
 
@@ -293,8 +312,9 @@ async function main() {
     // Serve static assets
     if (pathname.startsWith("/assets/")) {
       const assetPath = join(outputDir, pathname);
-      // Prevent directory traversal
-      if (!resolve(assetPath).startsWith(resolve(outputDir))) {
+      // Prevent directory traversal: relative path must stay inside outputDir
+      const rel = relative(resolve(outputDir), resolve(assetPath));
+      if (rel.startsWith("..") || isAbsolute(rel)) {
         res.writeHead(403);
         res.end("Forbidden");
         return;
@@ -322,18 +342,19 @@ async function main() {
 }
 
 function openBrowser(url: string) {
+  // execFile errors are surfaced asynchronously via the 'error' event and the
+  // callback argument, not sync throws — a try/catch around it is a no-op.
+  const swallow = () => {};
   const platform = process.platform;
-  try {
-    if (platform === "win32") {
-      execFile("cmd", ["/c", "start", "", url]);
-    } else if (platform === "darwin") {
-      execFile("open", [url]);
-    } else {
-      execFile("xdg-open", [url]);
-    }
-  } catch {
-    // Silently ignore if browser can't be opened
+  let child;
+  if (platform === "win32") {
+    child = execFile("cmd", ["/c", "start", "", url], swallow);
+  } else if (platform === "darwin") {
+    child = execFile("open", [url], swallow);
+  } else {
+    child = execFile("xdg-open", [url], swallow);
   }
+  child.on("error", swallow);
 }
 
 main();
