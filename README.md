@@ -42,8 +42,7 @@ Set the server port with the `PORT` environment variable.
 
 ### Gallery features
 
-- **Feed view** (default): scrollable timeline with full post text and images
-- **Grid view**: Pinterest-style card grid for visual scanning
+- **Feed**: scrollable timeline with full post text and images
 - **Search**: filter posts by text content
 - **Author filter**: dropdown listing all authors with post counts
 - **Sort**: newest, most liked, oldest

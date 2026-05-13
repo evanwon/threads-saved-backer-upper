@@ -197,30 +197,6 @@ async function validate(htmlPath?: string): Promise<void> {
   console.log(`Reply banners: ${replyBanners}`);
   if (replyBanners === 0) errors.push("Reply banner not rendered for reply post");
 
-  // Check: grid view works
-  await page.click("#gridBtn");
-  await page.waitForTimeout(200);
-  const gridMode = await page.locator("#feed.grid-mode").count();
-  if (gridMode === 0) errors.push("Grid mode did not activate");
-
-  // Check: clicking grid post opens modal
-  const gridPost = page.locator("#feed.grid-mode .post").first();
-  if ((await gridPost.count()) > 0) {
-    await gridPost.click();
-    await page.waitForTimeout(200);
-    const modal = await page.locator(".modal-backdrop").count();
-    if (modal === 0) errors.push("Modal did not open on grid click");
-    // Close modal
-    await page.keyboard.press("Escape");
-    await page.waitForTimeout(200);
-  }
-
-  // Check: feed view works
-  await page.click("#feedBtn");
-  await page.waitForTimeout(200);
-  const feedMode = await page.locator("#feed:not(.grid-mode)").count();
-  if (feedMode === 0) errors.push("Feed mode did not activate");
-
   // Check: note embed renders (fixture data only — real data may not have notes)
   const noteEmbeds = await page.locator(".note-embed").count();
   if (!htmlPath) {

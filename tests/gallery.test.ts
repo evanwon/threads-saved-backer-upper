@@ -360,11 +360,9 @@ describe("generateHtml", () => {
     assert.ok(html.includes("https?:\\/\\/[^\\s)&]+"));
   });
 
-  it("linkify: uses linkify for post text in feed and modal views", () => {
+  it("linkify: uses linkify for post text", () => {
     const html = generateHtml([samplePost]);
-    // Feed and modal views should use linkify(), not esc(), for post text
-    const linkifyCalls = html.match(/linkify\(p\.text\)/g) || [];
-    assert.ok(linkifyCalls.length >= 2, "expected linkify(p.text) in feed and modal views");
+    assert.ok(html.includes("linkify(p.text)"), "expected linkify(p.text) for post text");
   });
 
   it("linkify: post data with URL includes href-friendly characters", () => {
@@ -448,6 +446,5 @@ describe("generateHtml", () => {
   it("includes reply CSS styles", () => {
     const html = generateHtml([samplePost]);
     assert.ok(html.includes(".reply-banner"));
-    assert.ok(html.includes(".reply-badge"));
   });
 });
