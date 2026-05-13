@@ -18,33 +18,18 @@ npx playwright install chromium
 ## Usage
 
 ```bash
-npm start
+npm run serve
 ```
 
-### Output Directory
+This starts a local server at `localhost:3000` and opens your browser to a gallery of your saved posts. Click the **refresh button** in the bottom-right corner to scrape — progress is streamed to the page in real time via Server-Sent Events, and the gallery auto-reloads when new posts are fetched.
 
-By default, posts are saved to `./output/`. To write directly to your Obsidian vault (or any other folder):
-
-```bash
-# One-time override
-npm start -- --output ~/ObsidianVault/Threads
-
-# Save as persistent default (writes config.json)
-npm start -- --output ~/ObsidianVault/Threads --save-config
-
-# After saving, just run without flags
-npm start
-```
-
-The `-o` short flag also works: `npm start -- -o ~/ObsidianVault/Threads`
-
-Priority: `--output` flag > `config.json` > `./output`
+Set the server port with the `PORT` environment variable.
 
 ### Login
 
-**First run**: A Chromium browser opens to `threads.com/login`. Log in manually. Once logged in, the session is saved to `session.json` for future runs.
+**First refresh**: A Chromium browser opens to `threads.com/login`. Log in manually. Once logged in, the session is saved to `session.json` for future runs.
 
-**Subsequent runs**: The saved session is reused automatically. If it expires, you'll be prompted to log in again.
+**Subsequent refreshes**: The saved session is reused automatically. If it expires, you'll be prompted to log in again.
 
 ### What it does
 
@@ -53,19 +38,9 @@ Priority: `--output` flag > `config.json` > `./output`
 3. Download images and author profile pictures (videos are linked but not downloaded)
 4. Generate one markdown file per post in your output directory
 5. Save state for incremental backups
-6. Generate a browsable HTML gallery (`index.html`)
+6. Regenerate the browsable HTML gallery (`index.html`)
 
-## Gallery Viewer
-
-Each backup run also generates `index.html` in your output directory — a self-contained gallery for browsing all your saved posts in the browser. You can open the file directly, or use serve mode for a more integrated experience.
-
-### Serve Mode
-
-```bash
-npm run serve
-```
-
-Starts a local server at `localhost:3000` that serves the gallery with a **refresh button**. Clicking refresh triggers the full scrape pipeline from within the browser, with real-time progress updates streamed via Server-Sent Events. The page auto-reloads when new posts are fetched. Set the port with the `PORT` environment variable.
+### Gallery features
 
 - **Feed view** (default): scrollable timeline with full post text and images
 - **Grid view**: Pinterest-style card grid for visual scanning
@@ -73,12 +48,35 @@ Starts a local server at `localhost:3000` that serves the gallery with a **refre
 - **Author filter**: dropdown listing all authors with post counts
 - **Sort**: newest, most liked, oldest
 
-The gallery is regenerated automatically after every backup, including runs where no new posts are found.
+### Output directory
 
-To regenerate the gallery without scraping new data (useful when iterating on the gallery template):
+By default, posts are saved to `./output/`. To write directly to your Obsidian vault (or any other folder), set the path once via the CLI and save it as the persistent default:
 
 ```bash
+npm start -- --output ~/ObsidianVault/Threads --save-config
+```
+
+This writes `config.json`, which both `npm run serve` and `npm start` will read on subsequent runs.
+
+Priority: `--output` flag (CLI only) > `config.json` > `./output`
+
+## One-off CLI runs
+
+If you'd rather run a single backup from the command line (no server, no browser UI), use `npm start`. It runs the exact same pipeline as serve mode and exits when finished — useful for scheduled jobs or scripted workflows. The output directory contains a standalone `index.html` you can open directly in a browser.
+
+```bash
+# Run a backup
+npm start
+
+# One-time output override (does not persist)
+npm start -- --output ~/ObsidianVault/Threads
+npm start -- -o ~/ObsidianVault/Threads
+
+# Regenerate the gallery HTML without scraping (useful when iterating on the template)
 npm start -- --gallery-only
+
+# Scrape a single post into an isolated directory (skips state tracking)
+npm start -- --url https://www.threads.net/post/XYZ --output /tmp/test
 ```
 
 ### Debugging: Raw JSON Dump
